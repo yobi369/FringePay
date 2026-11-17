@@ -46,7 +46,10 @@ def test_payment_can_transition_from_processing_to_succeeded() -> None:
     assert payment.transition_to(PaymentStatus.SUCCEEDED).status is PaymentStatus.SUCCEEDED
 
 
-@pytest.mark.parametrize("terminal", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED, PaymentStatus.CANCELLED])
+@pytest.mark.parametrize(
+    "terminal",
+    [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED, PaymentStatus.CANCELLED],
+)
 def test_terminal_payment_cannot_transition_again(terminal: PaymentStatus) -> None:
     payment = Payment("p1", Money(100, "KES"), "ref", "sandbox", None, terminal)
     with pytest.raises(InvalidPaymentTransition):
