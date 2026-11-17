@@ -223,6 +223,7 @@ class PaymentRepository:
                         status=PaymentStatus.PENDING.value,
                     )
                     session.add(row)
+                    await session.flush()
                     session.add(
                         IdempotencyRow(
                             key=idempotency_key,
@@ -485,6 +486,7 @@ class PaymentRepository:
                             description=journal.description,
                         )
                     )
+                    await session.flush()
                     for line in journal.lines:
                         session.add(
                             LedgerEntryRow(
