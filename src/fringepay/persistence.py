@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, update
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -283,6 +283,70 @@ class PaymentRepository:
                 event.updated_at = datetime.now(UTC)
                 await session.flush()
                 return replace(updated, provider_reference=provider_reference)
+
+
+    async def claim_next_dispatch(self) -> tuple[str, Payment] | None:
+        """Atomically claim the oldest due outbox event for a worker."""
+        now = datetime.now(UTC)
+        async with self.database.sessions() as session:
+            async with session.begin():
+                next_event = (
+                    select(ProviderDispatchOutboxRow.id)
+                    .where(
+                        ProviderDispatchOutboxRow.status.in_(("pending", "retry")),
+                        ProviderDispatchOutboxRow.available_at <= now,
+                    )
+                    .order_by(ProviderDispatchOutboxRow.created_at)
+                    .limit(1)
+                    .scalar_subquery()
+                )
+                statement = (
+                    update(ProviderDispatchOutboxRow)
+                    .where(
+                        ProviderDispatchOutboxRow.id == next_event,
+                        ProviderDispatchOutboxRow.status.in_(("pending", "retry")),
+                    )
+                    .values(
+                        status="processing",
+                        attempts=ProviderDispatchOutboxRow.attempts + 1,
+                        locked_at=now,
+                        updated_at=now,
+                    )
+                    .returning(
+                        ProviderDispatchOutboxRow.id,
+                        ProviderDispatchOutboxRow.payment_id,
+                    )
+                )
+                result = await session.execute(statement)
+                claimed = result.one_or_none()
+                if claimed is None:
+                    return None
+                payment_row = await session.get(PaymentRow, claimed.payment_id)
+                if payment_row is None:
+                    raise RuntimeError("outbox event has no payment")
+                return claimed.id, self._to_domain(payment_row)
+
+    async def recover_stale_dispatches(self, stale_after_seconds: int = 60) -> int:
+        """Make abandoned processing leases eligible for safe idempotent retry."""
+        now = datetime.now(UTC)
+        cutoff = now - timedelta(seconds=stale_after_seconds)
+        async with self.database.sessions() as session:
+            async with session.begin():
+                result = await session.execute(
+                    update(ProviderDispatchOutboxRow)
+                    .where(
+                        ProviderDispatchOutboxRow.status == "processing",
+                        ProviderDispatchOutboxRow.locked_at < cutoff,
+                    )
+                    .values(
+                        status="retry",
+                        available_at=now,
+                        locked_at=None,
+                        last_error_code="dispatch_lease_expired",
+                        updated_at=now,
+                    )
+                )
+                return result.rowcount or 0
 
     async def retry_dispatch(
         self, outbox_id: str, error_code: str, retry_delay_seconds: int = 5
