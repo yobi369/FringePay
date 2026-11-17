@@ -71,7 +71,37 @@ FringePay is not a bank, wallet issuer, payment scheme, or substitute for provid
 
 ## Local development
 
-Setup instructions will be added with the first runnable API milestone. Never commit credentials, private keys, production customer data, or real payment secrets.
+Install the project and development tools, then run the API:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+uvicorn fringepay.main:app --reload
+```
+
+The initial sandbox API exposes:
+
+- `GET /health` — process health only; it does not verify database/provider readiness.
+- `GET /v1/status` — confirms that the API is sandbox-only.
+- `POST /v1/payments` — create a simulated payment. Requires an `Idempotency-Key` header and a JSON body with `amount_minor`, `currency`, and `reference`.
+- `GET /v1/payments/{payment_id}` — retrieve a payment held by the current process.
+
+Example request:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/payments \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: local-order-001" \
+  -d '{"amount_minor":1250,"currency":"KES","reference":"order-001"}'
+```
+
+The current adapter returns a simulated pending result. Payment and idempotency data are in-memory only,
+so they disappear on restart and are not safe for multi-worker or production use. See
+[the sandbox boundary](docs/architecture/sandbox-boundary.md) before experimenting.
+
+Run quality checks with `ruff check .` and `pytest`. Never commit credentials, private keys,
+production customer data, or real payment secrets.
 
 ## License
 
