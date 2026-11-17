@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_prefix: str = "/v1"
     database_url: str = "sqlite+aiosqlite:///./fringepay.db"
-    api_key: str | None = None
     sandbox_webhook_secret: str | None = None
     webhook_tolerance_seconds: int = 300
 
