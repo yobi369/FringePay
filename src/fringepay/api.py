@@ -1,8 +1,11 @@
 """HTTP routes for sandbox payment operations."""
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+import hmac
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from fringepay.config import get_settings
 from fringepay.domain import Money
 from fringepay.persistence import (
     PaymentRepository,
@@ -11,7 +14,23 @@ from fringepay.persistence import (
 from fringepay.providers import PaymentCommand, SandboxProvider
 from fringepay.service import CreatePayment
 
-router = APIRouter(prefix="/payments", tags=["payments"])
+def require_api_key(
+    api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> None:
+    """Require a configured key; development has an explicit local-only key."""
+    settings = get_settings()
+    expected = settings.api_key
+    if expected is None and settings.environment != "production":
+        expected = "local-development-key"
+    if expected is None or api_key is None or not hmac.compare_digest(api_key, expected):
+        raise HTTPException(status_code=401, detail="invalid or missing API key")
+
+
+router = APIRouter(
+    prefix="/payments",
+    tags=["payments"],
+    dependencies=[Depends(require_api_key)],
+)
 sandbox_provider = SandboxProvider()
 
 
