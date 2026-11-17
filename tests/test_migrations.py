@@ -23,6 +23,6 @@ def test_initial_migration_creates_expected_tables(
             table_names = set(inspect(engine).get_table_names())
         finally:
             engine.dispose()
-        assert {"payments", "idempotency_keys", "alembic_version"} <= table_names
+        assert {"payments", "idempotency_keys", "provider_dispatch_outbox", "alembic_version"} <= table_names
     finally:
         get_settings.cache_clear()
