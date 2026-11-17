@@ -582,20 +582,36 @@ class PaymentRepository:
                 return result.rowcount or 0
 
     async def retry_dispatch(
-        self, outbox_id: str, error_code: str, retry_delay_seconds: int = 5
+        self,
+        outbox_id: str,
+        error_code: str,
+        retry_delay_seconds: int | None = None,
     ) -> None:
-        """Schedule a claimed event for retry without storing exception details."""
+        """Apply bounded exponential backoff and dead-letter exhausted events."""
         async with self.database.sessions() as session:
             async with session.begin():
                 event = await session.get(ProviderDispatchOutboxRow, outbox_id)
                 if event is None or event.status != "processing":
                     raise ValueError("dispatch event is not claimed")
                 now = datetime.now(UTC)
-                event.status = "retry"
-                event.available_at = now + timedelta(seconds=retry_delay_seconds)
+                if event.attempts >= 12:
+                    event.status = "dead_letter"
+                else:
+                    delay = retry_delay_seconds
+                    if delay is None:
+                        delay = min(300, 2 ** min(event.attempts, 8))
+                    event.status = "retry"
+                    event.available_at = now + timedelta(seconds=delay)
                 event.locked_at = None
                 event.last_error_code = error_code[:64]
                 event.updated_at = now
+
+    async def outbox_status(self, outbox_id: str) -> tuple[str, int, str | None] | None:
+        async with self.database.sessions() as session:
+            event = await session.get(ProviderDispatchOutboxRow, outbox_id)
+            if event is None:
+                return None
+            return event.status, event.attempts, event.last_error_code
 
 
 
