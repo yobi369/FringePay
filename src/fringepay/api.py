@@ -1,18 +1,21 @@
 """HTTP routes for sandbox payment operations."""
 
+import hashlib
 import hmac
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from fringepay.config import get_settings
-from fringepay.domain import Money
+from fringepay.domain import InvalidPaymentTransition, Money, PaymentStatus
 from fringepay.persistence import (
     PaymentRepository,
     PersistentIdempotencyConflict,
+    WebhookReplayConflict,
 )
 from fringepay.providers import PaymentCommand, SandboxProvider
 from fringepay.service import CreatePayment
+from fringepay.webhooks import InvalidWebhookSignature, verify_hmac_webhook
 
 
 def require_api_key(
@@ -114,3 +117,66 @@ async def get_payment(payment_id: str, request: Request) -> PaymentResponse:
     if payment is None:
         raise HTTPException(status_code=404, detail="payment not found")
     return PaymentResponse.from_domain(payment)
+
+
+webhook_router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+
+
+class ProviderWebhookBody(BaseModel):
+    payment_id: str = Field(min_length=1, max_length=36)
+    status: PaymentStatus
+
+
+@webhook_router.post("/{provider}")
+async def receive_provider_webhook(
+    provider: str,
+    request: Request,
+    signature: str = Header(alias="X-FringePay-Signature"),
+    event_id: str = Header(alias="X-Provider-Event-Id", min_length=1, max_length=128),
+) -> dict[str, str | bool]:
+    """Accept a signed sandbox callback with durable event replay protection."""
+    settings = get_settings()
+    if provider != "sandbox":
+        raise HTTPException(status_code=404, detail="provider webhook is not configured")
+    if not settings.sandbox_webhook_secret:
+        raise HTTPException(status_code=503, detail="sandbox webhook is not configured")
+
+    raw_body = await request.body()
+    try:
+        verify_hmac_webhook(
+            settings.sandbox_webhook_secret,
+            signature,
+            raw_body,
+            tolerance_seconds=settings.webhook_tolerance_seconds,
+        )
+    except InvalidWebhookSignature as exc:
+        raise HTTPException(status_code=401, detail="invalid webhook signature") from exc
+
+    try:
+        body = ProviderWebhookBody.model_validate_json(raw_body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="invalid webhook payload") from exc
+
+    repository: PaymentRepository = request.app.state.repository
+    payload_hash = hashlib.sha256(raw_body).hexdigest()
+    try:
+        payment, created = await repository.apply_provider_webhook(
+            provider,
+            event_id,
+            payload_hash,
+            body.payment_id,
+            body.status,
+        )
+    except WebhookReplayConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="payment not found") from exc
+    except (InvalidPaymentTransition, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return {
+        "accepted": True,
+        "duplicate": not created,
+        "payment_id": payment.id,
+        "status": payment.status.value,
+    }
