@@ -86,3 +86,33 @@ def test_create_and_retrieve_sandbox_payment(api_client: TestClient) -> None:
     fetched = api_client.get(f"/v1/payments/{body['id']}")
     assert fetched.status_code == 200
     assert fetched.json()["id"] == body["id"]
+
+
+def test_api_idempotency_is_durable_and_payload_bound(api_client: TestClient) -> None:
+    payload = {
+        "amount_minor": 1500,
+        "currency": "KES",
+        "reference": "api-idempotency-order",
+    }
+    headers = {"Idempotency-Key": "api-idempotency-key"}
+    first = api_client.post("/v1/payments", headers=headers, json=payload)
+    replay = api_client.post("/v1/payments", headers=headers, json=payload)
+    conflict = api_client.post(
+        "/v1/payments",
+        headers=headers,
+        json={**payload, "amount_minor": 1600},
+    )
+
+    assert first.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json()["id"] == first.json()["id"]
+    assert conflict.status_code == 409
+
+
+def test_api_rejects_float_minor_units(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/v1/payments",
+        headers={"Idempotency-Key": "float-amount-key"},
+        json={"amount_minor": 10.5, "currency": "KES", "reference": "float-order"},
+    )
+    assert response.status_code == 422
