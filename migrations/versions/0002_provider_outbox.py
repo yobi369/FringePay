@@ -1,7 +1,6 @@
 """Add durable provider dispatch outbox."""
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "0002_provider_outbox"
