@@ -108,13 +108,13 @@ alembic upgrade head
 ```
 
 The local compose password is for development only. Replace it and use managed secrets for
-any shared environment. Development defaults to the local-only key `local-development-key`.
-Production startup fails unless `FRINGEPAY_API_KEY` is set. Local development seeds a tenant and the local-only key `local-development-key`. Deployed
-environments use `fringepay-admin create-tenant --name "Merchant Name"` after migrations; the
-random API key is displayed once and must be stored in a secret manager. Revoke a credential with
-`fringepay-admin revoke-api-key --tenant-id TENANT_ID --key-prefix KEY_PREFIX`. Production startup
-also verifies that the database has reached the latest Alembic revision. In a second terminal, run `fringepay-worker` to drain pending sandbox
-outbox events; it is designed to run as a separate process in a deployment.
+any shared environment. Local development seeds a tenant and the local-only key
+`local-development-key`. For a deployed environment, apply migrations and run
+`fringepay-admin create-tenant --name "Merchant Name"`; the random API key is displayed once
+and must be stored in a secret manager. Revoke a credential with
+`fringepay-admin revoke-api-key --tenant-id TENANT_ID --key-prefix KEY_PREFIX`. Production
+startup verifies that the database has reached the latest Alembic revision. In a second terminal,
+run `fringepay-worker` to drain pending sandbox outbox events.
 
 ## API
 
