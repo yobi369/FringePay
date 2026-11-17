@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
     select,
+    text,
     update,
 )
 from sqlalchemy.exc import IntegrityError
@@ -32,6 +33,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from fringepay.domain import Money, Payment, PaymentStatus
 from fringepay.ledger import EntrySide, Journal
 from fringepay.service import CreatePayment
+
+
+LATEST_SCHEMA_REVISION = "0005_api_credentials"
 
 
 class Base(DeclarativeBase):
@@ -231,6 +235,18 @@ class Database:
                             label="Local development key",
                         )
                     )
+
+    async def verify_schema_revision(self, expected_revision: str) -> None:
+        """Fail startup when a deployed database has not reached the expected schema."""
+        async with self.engine.connect() as connection:
+            result = await connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            )
+            revisions = result.scalars().all()
+        if revisions != [expected_revision]:
+            raise RuntimeError(
+                f"database schema revision mismatch: expected {expected_revision}"
+            )
 
     async def close(self) -> None:
         await self.engine.dispose()
