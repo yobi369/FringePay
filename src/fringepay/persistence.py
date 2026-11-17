@@ -8,7 +8,17 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, select, update
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    case,
+    func,
+    select,
+    update,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -18,6 +28,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from fringepay.domain import Money, Payment, PaymentStatus
+from fringepay.ledger import EntrySide, Journal
 from fringepay.service import CreatePayment
 
 
@@ -82,6 +93,45 @@ class ProviderDispatchOutboxRow(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
         nullable=False,
+    )
+
+
+class LedgerAccountRow(Base):
+    __tablename__ = "ledger_accounts"
+
+    code: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    normal_side: Mapped[str] = mapped_column(String(6), nullable=False)
+
+
+class LedgerTransactionRow(Base):
+    __tablename__ = "ledger_transactions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    reference: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    description: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+
+class LedgerEntryRow(Base):
+    __tablename__ = "ledger_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    transaction_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("ledger_transactions.id", ondelete="RESTRICT")
+    )
+    account_code: Mapped[str] = mapped_column(
+        String(64), ForeignKey("ledger_accounts.code", ondelete="RESTRICT")
+    )
+    side: Mapped[str] = mapped_column(String(6), nullable=False)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
 
 
@@ -363,6 +413,121 @@ class PaymentRepository:
                 event.locked_at = None
                 event.last_error_code = error_code[:64]
                 event.updated_at = now
+
+
+    async def create_ledger_account(
+        self, code: str, name: str, currency: str, normal_side: EntrySide
+    ) -> None:
+        if not code or len(code) > 64 or not name or len(name) > 128:
+            raise ValueError("ledger account code and name are required")
+        if len(currency) != 3 or not currency.isupper():
+            raise ValueError("ledger account currency must be uppercase ISO code")
+        async with self.database.sessions() as session:
+            async with session.begin():
+                existing = await session.get(LedgerAccountRow, code)
+                if existing is not None:
+                    if (
+                        existing.name != name
+                        or existing.currency != currency
+                        or existing.normal_side != normal_side.value
+                    ):
+                        raise ValueError("ledger account already exists with different details")
+                    return
+                session.add(
+                    LedgerAccountRow(
+                        code=code,
+                        name=name,
+                        currency=currency,
+                        normal_side=normal_side.value,
+                    )
+                )
+
+    async def post_journal(self, journal: Journal) -> tuple[str, bool]:
+        """Post a balanced journal once, using its reference as an idempotency key."""
+        request_hash = journal.fingerprint()
+        try:
+            async with self.database.sessions() as session:
+                async with session.begin():
+                    existing = await session.scalar(
+                        select(LedgerTransactionRow).where(
+                            LedgerTransactionRow.reference == journal.reference
+                        )
+                    )
+                    if existing is not None:
+                        if existing.request_hash != request_hash:
+                            raise ValueError(
+                                "journal reference was already used with different entries"
+                            )
+                        return existing.id, False
+
+                    for line in journal.lines:
+                        account = await session.get(LedgerAccountRow, line.account_code)
+                        if account is None:
+                            raise ValueError(
+                                f"ledger account does not exist: {line.account_code}"
+                            )
+                        if account.currency != journal.currency:
+                            raise ValueError(
+                                f"ledger account currency mismatch: {line.account_code}"
+                            )
+
+                    transaction_id = str(uuid4())
+                    session.add(
+                        LedgerTransactionRow(
+                            id=transaction_id,
+                            reference=journal.reference,
+                            request_hash=request_hash,
+                            currency=journal.currency,
+                            description=journal.description,
+                        )
+                    )
+                    for line in journal.lines:
+                        session.add(
+                            LedgerEntryRow(
+                                id=str(uuid4()),
+                                transaction_id=transaction_id,
+                                account_code=line.account_code,
+                                side=line.side.value,
+                                amount_minor=line.amount_minor,
+                            )
+                        )
+                    await session.flush()
+                    return transaction_id, True
+        except IntegrityError:
+            async with self.database.sessions() as session:
+                existing = await session.scalar(
+                    select(LedgerTransactionRow).where(
+                        LedgerTransactionRow.reference == journal.reference
+                    )
+                )
+                if existing is None:
+                    raise
+                if existing.request_hash != request_hash:
+                    raise ValueError(
+                        "journal reference was already used with different entries"
+                    ) from None
+                return existing.id, False
+
+    async def account_balance(self, account_code: str) -> int:
+        async with self.database.sessions() as session:
+            account = await session.get(LedgerAccountRow, account_code)
+            if account is None:
+                raise KeyError(f"ledger account not found: {account_code}")
+            debit_total = await session.scalar(
+                select(func.coalesce(func.sum(LedgerEntryRow.amount_minor), 0)).where(
+                    LedgerEntryRow.account_code == account_code,
+                    LedgerEntryRow.side == EntrySide.DEBIT.value,
+                )
+            )
+            credit_total = await session.scalar(
+                select(func.coalesce(func.sum(LedgerEntryRow.amount_minor), 0)).where(
+                    LedgerEntryRow.account_code == account_code,
+                    LedgerEntryRow.side == EntrySide.CREDIT.value,
+                )
+            )
+            if account.normal_side == EntrySide.DEBIT.value:
+                return int(debit_total) - int(credit_total)
+            return int(credit_total) - int(debit_total)
 
     async def get(self, payment_id: str) -> Payment | None:
         async with self.database.sessions() as session:
