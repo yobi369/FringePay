@@ -12,6 +12,8 @@ from fringepay.persistence import Database, PaymentRepository
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     settings = get_settings()
+    if settings.environment == "production" and not settings.api_key:
+        raise RuntimeError("FRINGEPAY_API_KEY must be configured in production")
     database = Database(settings.database_url)
     if settings.environment != "production":
         await database.create_schema()
