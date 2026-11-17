@@ -1,10 +1,10 @@
 """Domain validation for immutable, balanced double-entry journals."""
 
-from dataclasses import dataclass
-from enum import StrEnum
 import hashlib
 import json
 import re
+from dataclasses import dataclass
+from enum import StrEnum
 
 
 class EntrySide(StrEnum):
