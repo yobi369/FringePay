@@ -14,6 +14,7 @@ from fringepay.persistence import (
 from fringepay.providers import PaymentCommand, SandboxProvider
 from fringepay.service import CreatePayment
 
+
 def require_api_key(
     api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> None:
