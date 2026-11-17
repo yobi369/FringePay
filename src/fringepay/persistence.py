@@ -7,7 +7,7 @@ import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, select
+from sqlalchemy import BigInteger, DateTime, ForeignKey, String
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -165,10 +165,10 @@ class PaymentRepository:
                 if existing.request_hash != request_hash:
                     raise PersistentIdempotencyConflict(
                         "idempotency key was already used for another request"
-                    )
+                    ) from None
                 row = await session.get(PaymentRow, existing.payment_id)
                 if row is None:
-                    raise RuntimeError("idempotency record has no payment")
+                    raise RuntimeError("idempotency record has no payment") from None
                 return self._to_domain(row), False
 
     async def apply_provider_result(
