@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from fringepay.domain import Money, PaymentStatus
 from fringepay.config import get_settings
+from fringepay.domain import Money, PaymentStatus
 from fringepay.main import app
 from fringepay.providers import SandboxOutcome, SandboxProvider
 from fringepay.service import CreatePayment, IdempotencyConflict, PaymentService
