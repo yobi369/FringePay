@@ -68,6 +68,7 @@ async def test_service_rejects_status_update_for_unknown_payment() -> None:
 def test_create_payment_requires_idempotency_key(api_client: TestClient) -> None:
     response = api_client.post(
         "/v1/payments",
+        headers={"X-API-Key": "local-development-key"},
         json={"amount_minor": 1000, "currency": "KES", "reference": "order-1"},
     )
     assert response.status_code == 422
@@ -76,14 +77,20 @@ def test_create_payment_requires_idempotency_key(api_client: TestClient) -> None
 def test_create_and_retrieve_sandbox_payment(api_client: TestClient) -> None:
     response = api_client.post(
         "/v1/payments",
-        headers={"Idempotency-Key": "api-key-1"},
+        headers={
+            "Idempotency-Key": "api-key-1",
+            "X-API-Key": "local-development-key",
+        },
         json={"amount_minor": 1000, "currency": "KES", "reference": "order-api-1"},
     )
     assert response.status_code == 201
     body = response.json()
     assert body["provider"] == "sandbox"
     assert body["status"] == "pending"
-    fetched = api_client.get(f"/v1/payments/{body['id']}")
+    fetched = api_client.get(
+        f"/v1/payments/{body['id']}",
+        headers={"X-API-Key": "local-development-key"},
+    )
     assert fetched.status_code == 200
     assert fetched.json()["id"] == body["id"]
 
@@ -94,7 +101,10 @@ def test_api_idempotency_is_durable_and_payload_bound(api_client: TestClient) ->
         "currency": "KES",
         "reference": "api-idempotency-order",
     }
-    headers = {"Idempotency-Key": "api-idempotency-key"}
+    headers = {
+        "Idempotency-Key": "api-idempotency-key",
+        "X-API-Key": "local-development-key",
+    }
     first = api_client.post("/v1/payments", headers=headers, json=payload)
     replay = api_client.post("/v1/payments", headers=headers, json=payload)
     conflict = api_client.post(
@@ -112,7 +122,20 @@ def test_api_idempotency_is_durable_and_payload_bound(api_client: TestClient) ->
 def test_api_rejects_float_minor_units(api_client: TestClient) -> None:
     response = api_client.post(
         "/v1/payments",
-        headers={"Idempotency-Key": "float-amount-key"},
+        headers={
+            "Idempotency-Key": "float-amount-key",
+            "X-API-Key": "local-development-key",
+        },
         json={"amount_minor": 10.5, "currency": "KES", "reference": "float-order"},
     )
     assert response.status_code == 422
+
+
+
+def test_payment_api_rejects_missing_api_key(api_client: TestClient) -> None:
+    response = api_client.post(
+        "/v1/payments",
+        headers={"Idempotency-Key": "unauthenticated-key"},
+        json={"amount_minor": 100, "currency": "KES", "reference": "unauthenticated"},
+    )
+    assert response.status_code == 401
