@@ -738,6 +738,23 @@ class PaymentRepository:
                         return tenant.id
         return None
 
+
+    async def revoke_api_key(self, tenant_id: str, key_prefix: str) -> bool:
+        """Revoke one credential belonging to the specified tenant."""
+        async with self.database.sessions() as session:
+            async with session.begin():
+                credential = await session.scalar(
+                    select(ApiCredentialRow).where(
+                        ApiCredentialRow.tenant_id == tenant_id,
+                        ApiCredentialRow.key_prefix == key_prefix,
+                        ApiCredentialRow.revoked_at.is_(None),
+                    )
+                )
+                if credential is None:
+                    return False
+                credential.revoked_at = datetime.now(UTC)
+                return True
+
     async def create_tenant(self, name: str) -> tuple[str, str]:
         if not name.strip() or len(name) > 128:
             raise ValueError("tenant name must contain 1 to 128 characters")
