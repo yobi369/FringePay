@@ -34,7 +34,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from fringepay.domain import Money, Payment, PaymentStatus
 from fringepay.ledger import EntrySide, Journal
-from fringepay.reconciliation import SettlementLine, SettlementStatus
+from fringepay.reconciliation import (
+    SettlementConflict,
+    SettlementLine,
+    SettlementStatus,
+)
 from fringepay.service import CreatePayment
 
 LATEST_SCHEMA_REVISION = "0006_settlement_reconciliation"
