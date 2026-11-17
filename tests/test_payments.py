@@ -7,6 +7,7 @@ from fringepay.main import app
 from fringepay.providers import SandboxOutcome, SandboxProvider
 from fringepay.service import CreatePayment, IdempotencyConflict, PaymentService
 
+
 @pytest.fixture
 def api_client(tmp_path, monkeypatch):
     database_path = tmp_path / "api.db"
