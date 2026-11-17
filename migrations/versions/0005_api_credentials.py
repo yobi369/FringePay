@@ -4,7 +4,6 @@ import datetime
 import hashlib
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision = "0005_api_credentials"
