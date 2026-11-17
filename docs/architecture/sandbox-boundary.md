@@ -13,10 +13,11 @@ unique idempotency key prevents concurrent requests from reserving separate paym
 same key. A request with the same key but a different canonical payload is rejected. Keys are
 currently global, not tenant-scoped; tenant authentication and key scoping are not implemented.
 
-The API reserves a payment before invoking the sandbox adapter. A process crash after reservation
-but before provider execution can leave a pending record. A transactional outbox, dispatch worker,
-retry policy, and explicit unknown-outcome handling are required before relying on this pattern
-for external provider calls.
+The API reserves a payment, idempotency key, and provider-dispatch outbox event in one database
+transaction. The API and separate worker claim due events atomically. Failed attempts are scheduled
+for retry, and expired processing leases can be recovered. This is still a sandbox-only workflow:
+production adapters must use the stable payment ID as an external idempotency key and implement
+provider-specific unknown-outcome handling before retries can safely touch a live rail.
 
 Amounts are represented as integer minor units plus a three-letter uppercase currency code.
 For Kenya shillings, callers should send the amount in cents (for example, KSh 10.50 is 1050
