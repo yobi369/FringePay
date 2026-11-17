@@ -5,11 +5,13 @@ from typing import Protocol
 
 from fringepay.domain import Money, PaymentStatus
 
+
 @dataclass(frozen=True, slots=True)
 class PaymentCommand:
     payment_id: str
     amount: Money
     reference: str
+
 
 @dataclass(frozen=True, slots=True)
 class ProviderResult:
@@ -17,19 +19,23 @@ class ProviderResult:
     provider_reference: str | None
     status: PaymentStatus
 
+
 class PaymentProvider(Protocol):
     name: str
 
     async def initiate(self, command: PaymentCommand) -> ProviderResult:
         """Initiate a payment through this provider."""
 
+
 class SandboxOutcome(StrEnum):
     PENDING = "pending"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
 
+
 class SandboxProvider:
     """Deterministic test adapter; it never moves real money."""
+
     name = "sandbox"
 
     def __init__(self, outcome: SandboxOutcome = SandboxOutcome.PENDING) -> None:
