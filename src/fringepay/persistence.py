@@ -5,10 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -56,6 +56,32 @@ class IdempotencyRow(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+
+
+class ProviderDispatchOutboxRow(Base):
+    __tablename__ = "provider_dispatch_outbox"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    payment_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("payments.id", ondelete="RESTRICT"), unique=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
     )
 
 
@@ -155,6 +181,13 @@ class PaymentRepository:
                             payment_id=payment_id,
                         )
                     )
+                    session.add(
+                        ProviderDispatchOutboxRow(
+                            id=str(uuid4()),
+                            payment_id=payment_id,
+                            status="pending",
+                        )
+                    )
                     await session.flush()
                     return self._to_domain(row), True
         except IntegrityError:
@@ -190,6 +223,82 @@ class PaymentRepository:
                 row.updated_at = datetime.now(UTC)
                 await session.flush()
                 return replace(updated, provider_reference=provider_reference)
+
+
+
+    async def claim_dispatch(
+        self, payment_id: str
+    ) -> tuple[str, Payment] | None:
+        """Atomically claim a pending/retry dispatch for one payment."""
+        now = datetime.now(UTC)
+        async with self.database.sessions() as session:
+            async with session.begin():
+                statement = (
+                    update(ProviderDispatchOutboxRow)
+                    .where(
+                        ProviderDispatchOutboxRow.payment_id == payment_id,
+                        ProviderDispatchOutboxRow.status.in_(("pending", "retry")),
+                        ProviderDispatchOutboxRow.available_at <= now,
+                    )
+                    .values(
+                        status="processing",
+                        attempts=ProviderDispatchOutboxRow.attempts + 1,
+                        locked_at=now,
+                        updated_at=now,
+                    )
+                    .returning(ProviderDispatchOutboxRow.id)
+                )
+                result = await session.execute(statement)
+                outbox_id = result.scalar_one_or_none()
+                if outbox_id is None:
+                    return None
+                payment_row = await session.get(PaymentRow, payment_id)
+                if payment_row is None:
+                    raise RuntimeError("outbox event has no payment")
+                return outbox_id, self._to_domain(payment_row)
+
+    async def complete_dispatch(
+        self,
+        outbox_id: str,
+        status: PaymentStatus,
+        provider_reference: str | None,
+    ) -> Payment:
+        """Commit provider result and outbox completion atomically."""
+        async with self.database.sessions() as session:
+            async with session.begin():
+                event = await session.get(ProviderDispatchOutboxRow, outbox_id)
+                if event is None or event.status != "processing":
+                    raise ValueError("dispatch event is not claimed")
+                payment_row = await session.get(PaymentRow, event.payment_id)
+                if payment_row is None:
+                    raise RuntimeError("outbox event has no payment")
+                current = self._to_domain(payment_row)
+                updated = current.transition_to(status)
+                payment_row.status = updated.status.value
+                payment_row.provider_reference = provider_reference
+                payment_row.updated_at = datetime.now(UTC)
+                event.status = "completed"
+                event.locked_at = None
+                event.last_error_code = None
+                event.updated_at = datetime.now(UTC)
+                await session.flush()
+                return replace(updated, provider_reference=provider_reference)
+
+    async def retry_dispatch(
+        self, outbox_id: str, error_code: str, retry_delay_seconds: int = 5
+    ) -> None:
+        """Schedule a claimed event for retry without storing exception details."""
+        async with self.database.sessions() as session:
+            async with session.begin():
+                event = await session.get(ProviderDispatchOutboxRow, outbox_id)
+                if event is None or event.status != "processing":
+                    raise ValueError("dispatch event is not claimed")
+                now = datetime.now(UTC)
+                event.status = "retry"
+                event.available_at = now + timedelta(seconds=retry_delay_seconds)
+                event.locked_at = None
+                event.last_error_code = error_code[:64]
+                event.updated_at = now
 
     async def get(self, payment_id: str) -> Payment | None:
         async with self.database.sessions() as session:
