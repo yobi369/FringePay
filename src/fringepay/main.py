@@ -24,3 +24,7 @@ async def health() -> dict[str, str]:
 async def api_status() -> dict[str, str]:
     """Expose the current API mode without leaking secrets or infrastructure details."""
     return {"service": "fringepay", "mode": "sandbox-only", "environment": settings.environment}
+
+from fringepay.api import router as payments_router
+
+app.include_router(payments_router, prefix=settings.api_prefix)
