@@ -7,7 +7,11 @@ from fastapi import FastAPI
 from fringepay.api import router as payments_router
 from fringepay.api import webhook_router
 from fringepay.config import get_settings
-from fringepay.persistence import Database, PaymentRepository
+from fringepay.persistence import (
+    LATEST_SCHEMA_REVISION,
+    Database,
+    PaymentRepository,
+)
 
 
 @asynccontextmanager
@@ -16,6 +20,8 @@ async def lifespan(application: FastAPI):
     database = Database(settings.database_url)
     if settings.environment != "production":
         await database.create_schema()
+    else:
+        await database.verify_schema_revision(LATEST_SCHEMA_REVISION)
     application.state.database = database
     application.state.repository = PaymentRepository(database)
     try:
