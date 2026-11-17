@@ -30,6 +30,7 @@ external providers remain responsible for executing regulated payment rails.
 - Transactional provider-dispatch outbox with atomic claims, retry scheduling, and expired-lease recovery.
 - Separate worker command for draining due outbox events (currently sandbox adapter only).
 - Double-entry journal validation and persistence with idempotent journal references and derived account balances.
+- API-key protection for payment routes, using constant-time comparison.
 - Strict integer validation for monetary minor units.
 - Lifecycle transition validation and CI lint/test checks.
 
@@ -106,16 +107,19 @@ alembic upgrade head
 ```
 
 The local compose password is for development only. Replace it and use managed secrets for
-any shared environment. In a second terminal, run `fringepay-worker` to drain pending sandbox
+any shared environment. Development defaults to the local-only key `local-development-key`.
+Production startup fails unless `FRINGEPAY_API_KEY` is set. This is currently one shared key,
+not tenant-scoped credential management; it is not sufficient as the final production identity
+and authorization model. In a second terminal, run `fringepay-worker` to drain pending sandbox
 outbox events; it is designed to run as a separate process in a deployment.
 
 ## API
 
 - `GET /health` — process health only; it does not prove database/provider readiness.
 - `GET /v1/status` — confirms sandbox-only mode.
-- `POST /v1/payments` — create a simulated payment. Requires an `Idempotency-Key` header and
-  JSON body with `amount_minor`, `currency`, and `reference`.
-- `GET /v1/payments/{payment_id}` — retrieve a persisted payment.
+- `POST /v1/payments` — create a simulated payment. Requires `X-API-Key` and `Idempotency-Key`
+  headers plus JSON body with `amount_minor`, `currency`, and `reference`.
+- `GET /v1/payments/{payment_id}` — retrieve a persisted payment; requires `X-API-Key`.
 
 Example:
 
