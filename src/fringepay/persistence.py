@@ -34,6 +34,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from fringepay.domain import Money, Payment, PaymentStatus
 from fringepay.ledger import EntrySide, Journal
+from fringepay.reconciliation import SettlementLine, SettlementStatus
 from fringepay.service import CreatePayment
 
 LATEST_SCHEMA_REVISION = "0005_api_credentials"
@@ -72,6 +73,12 @@ class ApiCredentialRow(Base):
 
 class PaymentRow(Base):
     __tablename__ = "payments"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "provider", "provider_reference",
+            name="uq_payment_tenant_provider_reference",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(
@@ -220,6 +227,38 @@ class ProviderWebhookEventRow(Base):
 
 class WebhookReplayConflict(ValueError):
     """Raised when a provider reuses an event ID for different content."""
+
+
+class SettlementRecordRow(Base):
+    __tablename__ = "settlement_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "provider",
+            "provider_reference",
+            name="uq_settlement_provider_reference",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id"], ["tenants.id"], ondelete="RESTRICT"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_reference: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    settled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source_reference: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    payment_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("payments.id", ondelete="RESTRICT")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
 
 class PersistentIdempotencyConflict(ValueError):
@@ -626,6 +665,104 @@ class PaymentRepository:
                 if payment_row is None:
                     raise RuntimeError("webhook event has no payment") from None
                 return self._to_domain(payment_row), False
+
+
+    async def reconcile_settlement(
+        self,
+        tenant_id: str,
+        provider: str,
+        line: SettlementLine,
+    ) -> tuple[str, SettlementStatus, str | None, bool]:
+        """Match one imported statement row without treating it as a payment command."""
+        if not provider or len(provider) > 64:
+            raise ValueError("provider name must contain 1 to 64 characters")
+        payload_hash = line.fingerprint(provider)
+        try:
+            async with self.database.sessions() as session:
+                async with session.begin():
+                    existing = await session.scalar(
+                        select(SettlementRecordRow).where(
+                            SettlementRecordRow.tenant_id == tenant_id,
+                            SettlementRecordRow.provider == provider,
+                            SettlementRecordRow.provider_reference
+                            == line.provider_reference,
+                        )
+                    )
+                    if existing is not None:
+                        if existing.payload_hash != payload_hash:
+                            raise SettlementConflict(
+                                "settlement reference was reused with different statement data"
+                            )
+                        return (
+                            existing.id,
+                            SettlementStatus(existing.status),
+                            existing.payment_id,
+                            False,
+                        )
+
+                    payment = await session.scalar(
+                        select(PaymentRow).where(
+                            PaymentRow.tenant_id == tenant_id,
+                            PaymentRow.provider == provider,
+                            PaymentRow.provider_reference == line.provider_reference,
+                        )
+                    )
+                    if payment is None:
+                        status = SettlementStatus.UNMATCHED
+                        payment_id = None
+                    elif (
+                        payment.amount_minor != line.amount_minor
+                        or payment.currency != line.currency
+                    ):
+                        status = SettlementStatus.MISMATCH
+                        payment_id = payment.id
+                    elif payment.status != PaymentStatus.SUCCEEDED.value:
+                        status = SettlementStatus.PENDING
+                        payment_id = payment.id
+                    else:
+                        status = SettlementStatus.MATCHED
+                        payment_id = payment.id
+
+                    record_id = str(uuid4())
+                    session.add(
+                        SettlementRecordRow(
+                            id=record_id,
+                            tenant_id=tenant_id,
+                            provider=provider,
+                            provider_reference=line.provider_reference,
+                            amount_minor=line.amount_minor,
+                            currency=line.currency,
+                            settled_at=line.settled_at,
+                            source_reference=line.source_reference,
+                            payload_hash=payload_hash,
+                            status=status.value,
+                            payment_id=payment_id,
+                        )
+                    )
+                    await session.flush()
+                    return record_id, status, payment_id, True
+        except IntegrityError:
+            async with self.database.sessions() as session:
+                existing = await session.scalar(
+                    select(SettlementRecordRow).where(
+                        SettlementRecordRow.tenant_id == tenant_id,
+                        SettlementRecordRow.provider == provider,
+                        SettlementRecordRow.provider_reference
+                        == line.provider_reference,
+                    )
+                )
+                if existing is None:
+                    raise
+                if existing.payload_hash != payload_hash:
+                    raise SettlementConflict(
+                        "settlement reference was reused with different statement data"
+                    ) from None
+                return (
+                    existing.id,
+                    SettlementStatus(existing.status),
+                    existing.payment_id,
+                    False,
+                )
 
     async def create_ledger_account(
         self,
