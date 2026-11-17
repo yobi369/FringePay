@@ -26,14 +26,17 @@ external providers remain responsible for executing regulated payment rails.
 - Deterministic sandbox provider adapter; no real payment rail is called.
 - SQLAlchemy 2 async persistence for payments and idempotency keys.
 - SQLite local default and PostgreSQL async driver support.
-- Alembic initial schema migration.
+- Alembic versioned schema migrations.
+- Transactional provider-dispatch outbox with atomic claims, retry scheduling, and expired-lease recovery.
+- Separate worker command for draining due outbox events (currently sandbox adapter only).
 - Strict integer validation for monetary minor units.
 - Lifecycle transition validation and CI lint/test checks.
 
-The HTTP request reserves a payment and idempotency key in one database transaction before
-calling the sandbox adapter. A repeated request with the same key and payload returns the
-existing payment; a changed payload returns HTTP 409. Recovery for a process crash between
-reservation and provider execution still requires a durable outbox/worker milestone.
+The HTTP request reserves a payment, idempotency key, and provider-dispatch outbox event in one
+database transaction. A repeated request with the same key and payload returns the existing
+payment; a changed payload returns HTTP 409. The API and a separate worker compete for events
+using atomic database claims, and abandoned processing leases can be retried. Provider adapters
+must use the stable payment ID as their external idempotency reference before live integrations.
 
 ## Planned architecture
 
@@ -100,7 +103,8 @@ alembic upgrade head
 ```
 
 The local compose password is for development only. Replace it and use managed secrets for
-any shared environment.
+any shared environment. In a second terminal, run `fringepay-worker` to drain pending sandbox
+outbox events; it is designed to run as a separate process in a deployment.
 
 ## API
 
@@ -126,7 +130,7 @@ For KES, `amount_minor` is cents: KSh 10.50 is represented as 1050.
 1. Repository foundation, domain models, configuration, and CI.
 2. Provider interface and deterministic sandbox adapter.
 3. Durable payment storage, idempotency, API integration, and lifecycle state machine.
-4. Crash-safe provider dispatch with transactional outbox and retries.
+4. Harden outbox recovery, provider idempotency, and PostgreSQL concurrency behavior.
 5. Immutable double-entry ledger with balance invariants.
 6. Signed webhook delivery, replay protection, and reconciliation.
 7. Tenant authentication, authorization, auditability, and operational controls.
