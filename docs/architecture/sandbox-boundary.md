@@ -24,7 +24,10 @@ For Kenya shillings, callers should send the amount in cents (for example, KSh 1
 minor units). The API rejects floating-point amounts.
 
 A sandbox success result is a simulated provider response. It is not evidence of settlement,
-a bank credit, or movement of customer funds. Production use requires tenant isolation,
-authenticated provider callbacks, durable outbox processing, immutable ledger postings,
-reconciliation, security review, provider contracts and credentials, and applicable
-regulatory/legal review.
+a bank credit, or movement of customer funds. Ledger journal primitives now validate balanced debit/credit entries, persist journal references
+idempotently, and derive account balances from entries. They are not yet automatically connected
+to payment or settlement events. The application layer does not expose journal mutation methods,
+but database-level append-only enforcement and verified-settlement integration remain outstanding.
+Production use requires tenant isolation, authenticated provider callbacks, durable outbox
+processing, verified settlement reconciliation, security review, provider contracts and credentials,
+and applicable regulatory/legal review.
