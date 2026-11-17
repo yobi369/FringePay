@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from fringepay.api import router as payments_router
+from fringepay.api import router as payments_router, webhook_router
 from fringepay.config import get_settings
 from fringepay.persistence import Database, PaymentRepository
 
@@ -53,3 +53,4 @@ async def api_status() -> dict[str, str]:
 
 
 app.include_router(payments_router, prefix=settings.api_prefix)
+app.include_router(webhook_router, prefix=settings.api_prefix)
