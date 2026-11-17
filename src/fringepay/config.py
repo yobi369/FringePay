@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     environment: str = "development"
     api_prefix: str = "/v1"
+    database_url: str = "sqlite+aiosqlite:///./fringepay.db"
 
     model_config = SettingsConfigDict(
         env_prefix="FRINGEPAY_",
