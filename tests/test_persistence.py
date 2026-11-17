@@ -7,6 +7,7 @@ from fringepay.persistence import (
     Database,
     PaymentRepository,
     PersistentIdempotencyConflict,
+    ProviderDispatchOutboxRow,
 )
 from fringepay.service import CreatePayment
 
@@ -144,4 +145,29 @@ async def test_tenant_credentials_isolate_payment_reads(tmp_path: Path) -> None:
     assert local_created is True
     assert local_payment.id != payment.id
     assert await repository.get(local_payment.id, "local") is not None
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_outbox_dead_letters_after_maximum_attempts(tmp_path: Path) -> None:
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'dead-letter.db'}")
+    await database.create_schema()
+    repository = PaymentRepository(database)
+    payment, _ = await repository.reserve(
+        CreatePayment(Money(100, "KES"), "dead-letter-order"),
+        "dead-letter-key",
+    )
+    claim = await repository.claim_dispatch(payment.id)
+    assert claim is not None
+    outbox_id, _ = claim
+
+    async with database.sessions() as session:
+        async with session.begin():
+            event = await session.get(ProviderDispatchOutboxRow, outbox_id)
+            assert event is not None
+            event.attempts = 12
+
+    await repository.retry_dispatch(outbox_id, "provider_dispatch_failed")
+    status = await repository.outbox_status(outbox_id)
+    assert status == ("dead_letter", 12, "provider_dispatch_failed")
     await database.close()
