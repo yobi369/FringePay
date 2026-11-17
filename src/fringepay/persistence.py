@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    UniqueConstraint,
     func,
     select,
     update,
@@ -132,6 +133,28 @@ class LedgerEntryRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
+
+
+class ProviderWebhookEventRow(Base):
+    __tablename__ = "provider_webhook_events"
+    __table_args__ = (
+        UniqueConstraint("provider", "event_id", name="uq_provider_webhook_event"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    payment_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("payments.id", ondelete="RESTRICT"), nullable=False
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+
+class WebhookReplayConflict(ValueError):
+    """Raised when a provider reuses an event ID for different content."""
 
 
 class PersistentIdempotencyConflict(ValueError):
@@ -414,6 +437,80 @@ class PaymentRepository:
                 event.last_error_code = error_code[:64]
                 event.updated_at = now
 
+
+
+    async def apply_provider_webhook(
+        self,
+        provider: str,
+        event_id: str,
+        payload_hash: str,
+        payment_id: str,
+        new_status: PaymentStatus,
+    ) -> tuple[Payment, bool]:
+        """Apply a verified webhook once, atomically with its replay record."""
+        if not provider or len(provider) > 64:
+            raise ValueError("provider name must contain 1 to 64 characters")
+        if not event_id or len(event_id) > 128:
+            raise ValueError("provider event ID must contain 1 to 128 characters")
+        try:
+            async with self.database.sessions() as session:
+                async with session.begin():
+                    existing = await session.scalar(
+                        select(ProviderWebhookEventRow).where(
+                            ProviderWebhookEventRow.provider == provider,
+                            ProviderWebhookEventRow.event_id == event_id,
+                        )
+                    )
+                    if existing is not None:
+                        if existing.payload_hash != payload_hash:
+                            raise WebhookReplayConflict(
+                                "provider event ID was reused with a different payload"
+                            )
+                        payment_row = await session.get(PaymentRow, existing.payment_id)
+                        if payment_row is None:
+                            raise RuntimeError("webhook event has no payment")
+                        return self._to_domain(payment_row), False
+
+                    payment_row = await session.scalar(
+                        select(PaymentRow)
+                        .where(PaymentRow.id == payment_id)
+                        .with_for_update()
+                    )
+                    if payment_row is None:
+                        raise KeyError(f"payment not found: {payment_id}")
+                    current = self._to_domain(payment_row)
+                    updated = current.transition_to(new_status)
+                    payment_row.status = updated.status.value
+                    payment_row.updated_at = datetime.now(UTC)
+                    session.add(
+                        ProviderWebhookEventRow(
+                            id=str(uuid4()),
+                            provider=provider,
+                            event_id=event_id,
+                            payload_hash=payload_hash,
+                            payment_id=payment_id,
+                        )
+                    )
+                    await session.flush()
+                    return updated, True
+        except IntegrityError:
+            async with self.database.sessions() as session:
+                existing = await session.scalar(
+                    select(ProviderWebhookEventRow).where(
+                        ProviderWebhookEventRow.provider == provider,
+                        ProviderWebhookEventRow.event_id == event_id,
+                    )
+                )
+                if existing is None:
+                    raise
+                if existing.payload_hash != payload_hash:
+                    raise WebhookReplayConflict(
+                        "provider event ID was reused with a different payload"
+                    ) from None
+                payment_row = await session.get(PaymentRow, existing.payment_id)
+                if payment_row is None:
+                    raise RuntimeError("webhook event has no payment") from None
+                return self._to_domain(payment_row), False
 
     async def create_ledger_account(
         self, code: str, name: str, currency: str, normal_side: EntrySide
