@@ -29,9 +29,11 @@ minor units). The API rejects floating-point amounts.
 A sandbox success result is a simulated provider response. It is not evidence of settlement,
 a bank credit, or movement of customer funds. Provider callbacks now have a sandbox-only timestamped HMAC-SHA256 verifier and durable event-ID
 replay protection. The signature scheme is an internal sandbox contract, not a provider-specific
-integration. Ledger journal primitives validate balanced debit/credit entries, persist journal
-references idempotently, and derive account balances from entries. They are not yet automatically connected
-to payment or settlement events. The application layer does not expose journal mutation methods,
+integration. Ledger journal primitives validate balanced debit/credit entries, persist journal references
+idempotently per tenant, and derive account balances from entries. Tenant-scoped settlement
+records can match provider references against succeeded payments and classify rows as matched,
+pending, unmatched, or mismatch. Statement-file ingestion and settlement-triggered ledger
+postings are not yet implemented; no sandbox event is treated as actual settlement. The application layer does not expose journal mutation methods,
 but database-level append-only enforcement and verified-settlement integration remain outstanding.
 Production use still requires finer-grained authorization, per-tenant rate limiting, tenant-scoped
 ledger and provider configuration, authenticated provider-specific callbacks, durable outbox
