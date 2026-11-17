@@ -17,8 +17,8 @@ or tenant-specific provider configuration. Ledger accounts and journals are stil
 must be tenant-scoped before ledger APIs are exposed.
 
 The API reserves a payment, idempotency key, and provider-dispatch outbox event in one database
-transaction. The API and separate worker claim due events atomically. Failed attempts are scheduled
-for retry, and expired processing leases can be recovered. This is still a sandbox-only workflow:
+transaction. The API and separate worker claim due events atomically. Failed attempts use bounded exponential backoff and move to a dead-letter state after the
+configured attempt limit; expired processing leases can be recovered. This is still a sandbox-only workflow:
 production adapters must use the stable payment ID as an external idempotency key and implement
 provider-specific unknown-outcome handling before retries can safely touch a live rail.
 
