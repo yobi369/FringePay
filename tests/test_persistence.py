@@ -136,10 +136,12 @@ async def test_tenant_credentials_isolate_payment_reads(tmp_path: Path) -> None:
     assert await repository.get(payment.id, tenant_id) is not None
     assert await repository.get(payment.id, "local") is None
 
-    with pytest.raises(PersistentIdempotencyConflict):
-        await repository.reserve(
-            request,
-            "tenant-isolation-key",
-            tenant_id="local",
-        )
+    local_payment, local_created = await repository.reserve(
+        request,
+        "tenant-isolation-key",
+        tenant_id="local",
+    )
+    assert local_created is True
+    assert local_payment.id != payment.id
+    assert await repository.get(local_payment.id, "local") is not None
     await database.close()
