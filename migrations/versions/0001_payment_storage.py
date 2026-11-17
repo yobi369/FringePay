@@ -53,13 +53,18 @@ def upgrade() -> None:
     )
     op.create_table(
         "idempotency_keys",
-        sa.Column("key", sa.String(length=128), primary_key=True),
+        sa.Column("tenant_id", sa.String(length=36), nullable=False),
+        sa.Column("key", sa.String(length=128), nullable=False),
         sa.Column("request_hash", sa.String(length=64), nullable=False),
         sa.Column("payment_id", sa.String(length=36), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(
+            ["tenant_id"], ["tenants.id"], ondelete="RESTRICT"
+        ),
+        sa.ForeignKeyConstraint(
             ["payment_id"], ["payments.id"], ondelete="RESTRICT"
         ),
+        sa.PrimaryKeyConstraint("tenant_id", "key"),
         sa.UniqueConstraint("payment_id"),
     )
 
