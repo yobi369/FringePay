@@ -10,8 +10,11 @@ automatically; deployed environments must apply versioned migrations.
 
 Payment reservation and idempotency-key insertion occur in one database transaction. The
 unique idempotency key prevents concurrent requests from reserving separate payments for the
-same key. A request with the same key but a different canonical payload is rejected. Keys are
-currently global, not tenant-scoped; tenant authentication and key scoping are not implemented.
+same key. A request with the same key but a different canonical payload is rejected. Tenant records and hashed, revocable API credentials are implemented. Payment retrieval and
+idempotency records are tenant-scoped; credentials are resolved to a tenant before payment routes
+run. The current model has no role-based permissions, credential scopes, per-tenant rate limits,
+or tenant-specific provider configuration. Ledger accounts and journals are still global and
+must be tenant-scoped before ledger APIs are exposed.
 
 The API reserves a payment, idempotency key, and provider-dispatch outbox event in one database
 transaction. The API and separate worker claim due events atomically. Failed attempts are scheduled
@@ -30,6 +33,7 @@ integration. Ledger journal primitives validate balanced debit/credit entries, p
 references idempotently, and derive account balances from entries. They are not yet automatically connected
 to payment or settlement events. The application layer does not expose journal mutation methods,
 but database-level append-only enforcement and verified-settlement integration remain outstanding.
-Production use requires tenant isolation, authenticated provider callbacks, durable outbox
+Production use still requires finer-grained authorization, per-tenant rate limiting, tenant-scoped
+ledger and provider configuration, authenticated provider-specific callbacks, durable outbox
 processing, verified settlement reconciliation, security review, provider contracts and credentials,
 and applicable regulatory/legal review.
