@@ -14,7 +14,9 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
+    PrimaryKeyConstraint,
     String,
     UniqueConstraint,
     func,
@@ -136,8 +138,15 @@ class ProviderDispatchOutboxRow(Base):
 
 class LedgerAccountRow(Base):
     __tablename__ = "ledger_accounts"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "code", name="pk_ledger_accounts"),
+        ForeignKeyConstraint(
+            ["tenant_id"], ["tenants.id"], ondelete="RESTRICT"
+        ),
+    )
 
-    code: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     normal_side: Mapped[str] = mapped_column(String(6), nullable=False)
@@ -145,9 +154,16 @@ class LedgerAccountRow(Base):
 
 class LedgerTransactionRow(Base):
     __tablename__ = "ledger_transactions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "reference", name="uq_ledger_tenant_reference"),
+        ForeignKeyConstraint(
+            ["tenant_id"], ["tenants.id"], ondelete="RESTRICT"
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    reference: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    reference: Mapped[str] = mapped_column(String(128), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     description: Mapped[str] = mapped_column(String(256), nullable=False)
@@ -158,14 +174,22 @@ class LedgerTransactionRow(Base):
 
 class LedgerEntryRow(Base):
     __tablename__ = "ledger_entries"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["transaction_id"], ["ledger_transactions.id"], ondelete="RESTRICT"
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "account_code"],
+            ["ledger_accounts.tenant_id", "ledger_accounts.code"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("tenant_id", "transaction_id", "account_code"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    transaction_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("ledger_transactions.id", ondelete="RESTRICT")
-    )
-    account_code: Mapped[str] = mapped_column(
-        String(64), ForeignKey("ledger_accounts.code", ondelete="RESTRICT")
-    )
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    transaction_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    account_code: Mapped[str] = mapped_column(String(64), nullable=False)
     side: Mapped[str] = mapped_column(String(6), nullable=False)
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -601,7 +625,12 @@ class PaymentRepository:
                 return self._to_domain(payment_row), False
 
     async def create_ledger_account(
-        self, code: str, name: str, currency: str, normal_side: EntrySide
+        self,
+        code: str,
+        name: str,
+        currency: str,
+        normal_side: EntrySide,
+        tenant_id: str = "local",
     ) -> None:
         if not code or len(code) > 64 or not name or len(name) > 128:
             raise ValueError("ledger account code and name are required")
@@ -614,7 +643,7 @@ class PaymentRepository:
             raise ValueError("ledger account currency must be uppercase ISO code")
         async with self.database.sessions() as session:
             async with session.begin():
-                existing = await session.get(LedgerAccountRow, code)
+                existing = await session.get(LedgerAccountRow, (tenant_id, code))
                 if existing is not None:
                     if (
                         existing.name != name
@@ -625,6 +654,7 @@ class PaymentRepository:
                     return
                 session.add(
                     LedgerAccountRow(
+                        tenant_id=tenant_id,
                         code=code,
                         name=name,
                         currency=currency,
@@ -632,7 +662,9 @@ class PaymentRepository:
                     )
                 )
 
-    async def post_journal(self, journal: Journal) -> tuple[str, bool]:
+    async def post_journal(
+        self, journal: Journal, tenant_id: str = "local"
+    ) -> tuple[str, bool]:
         """Post a balanced journal once, using its reference as an idempotency key."""
         request_hash = journal.fingerprint()
         try:
@@ -640,6 +672,7 @@ class PaymentRepository:
                 async with session.begin():
                     existing = await session.scalar(
                         select(LedgerTransactionRow).where(
+                            LedgerTransactionRow.tenant_id == tenant_id,
                             LedgerTransactionRow.reference == journal.reference
                         )
                     )
@@ -651,7 +684,7 @@ class PaymentRepository:
                         return existing.id, False
 
                     for line in journal.lines:
-                        account = await session.get(LedgerAccountRow, line.account_code)
+                        account = await session.get(LedgerAccountRow, (tenant_id, line.account_code))
                         if account is None:
                             raise ValueError(
                                 f"ledger account does not exist: {line.account_code}"
@@ -665,6 +698,7 @@ class PaymentRepository:
                     session.add(
                         LedgerTransactionRow(
                             id=transaction_id,
+                            tenant_id=tenant_id,
                             reference=journal.reference,
                             request_hash=request_hash,
                             currency=journal.currency,
@@ -676,6 +710,7 @@ class PaymentRepository:
                         session.add(
                             LedgerEntryRow(
                                 id=str(uuid4()),
+                                tenant_id=tenant_id,
                                 transaction_id=transaction_id,
                                 account_code=line.account_code,
                                 side=line.side.value,
@@ -699,19 +734,23 @@ class PaymentRepository:
                     ) from None
                 return existing.id, False
 
-    async def account_balance(self, account_code: str) -> int:
+    async def account_balance(
+        self, account_code: str, tenant_id: str = "local"
+    ) -> int:
         async with self.database.sessions() as session:
-            account = await session.get(LedgerAccountRow, account_code)
+            account = await session.get(LedgerAccountRow, (tenant_id, account_code))
             if account is None:
                 raise KeyError(f"ledger account not found: {account_code}")
             debit_total = await session.scalar(
                 select(func.coalesce(func.sum(LedgerEntryRow.amount_minor), 0)).where(
+                    LedgerEntryRow.tenant_id == tenant_id,
                     LedgerEntryRow.account_code == account_code,
                     LedgerEntryRow.side == EntrySide.DEBIT.value,
                 )
             )
             credit_total = await session.scalar(
                 select(func.coalesce(func.sum(LedgerEntryRow.amount_minor), 0)).where(
+                    LedgerEntryRow.tenant_id == tenant_id,
                     LedgerEntryRow.account_code == account_code,
                     LedgerEntryRow.side == EntrySide.CREDIT.value,
                 )
