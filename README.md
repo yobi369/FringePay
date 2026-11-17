@@ -29,7 +29,8 @@ external providers remain responsible for executing regulated payment rails.
 - Alembic versioned schema migrations.
 - Transactional provider-dispatch outbox with atomic claims, retry scheduling, and expired-lease recovery.
 - Separate worker command for draining due outbox events (currently sandbox adapter only).
-- Double-entry journal validation and persistence with idempotent journal references and derived account balances.
+- Double-entry journal validation and tenant-scoped persistence with idempotent journal references and derived account balances.
+- Tenant-scoped settlement matching with duplicate detection and matched, pending, unmatched, and mismatch outcomes.
 - Tenant-scoped API credentials stored as SHA-256 hashes, with revocation and tenant-isolated payment reads.
 - Timestamped HMAC-SHA256 verification and replay protection for sandbox provider callbacks.
 - Strict integer validation for monetary minor units.
