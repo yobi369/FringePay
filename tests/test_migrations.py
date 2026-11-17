@@ -24,6 +24,7 @@ def test_initial_migration_creates_expected_tables(
         finally:
             engine.dispose()
         expected = {
+            "tenants",
             "payments",
             "idempotency_keys",
             "provider_dispatch_outbox",
