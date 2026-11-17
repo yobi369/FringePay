@@ -113,3 +113,31 @@ async def test_outbox_failed_dispatch_can_be_retried(tmp_path: Path) -> None:
         second_outbox_id, PaymentStatus.PENDING, "sandbox-retry-ref"
     )
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_tenant_credentials_isolate_payment_reads(tmp_path: Path) -> None:
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'tenants.db'}")
+    await database.create_schema()
+    repository = PaymentRepository(database)
+    tenant_id, tenant_key = await repository.create_tenant("Merchant Alpha")
+    assert await repository.authenticate_api_key("local-development-key") == "local"
+    assert await repository.authenticate_api_key(tenant_key) == tenant_id
+
+    request = CreatePayment(Money(2300, "KES"), "tenant-isolation-order")
+    payment, created = await repository.reserve(
+        request,
+        "tenant-isolation-key",
+        tenant_id=tenant_id,
+    )
+    assert created is True
+    assert await repository.get(payment.id, tenant_id) is not None
+    assert await repository.get(payment.id, "local") is None
+
+    with pytest.raises(PersistentIdempotencyConflict):
+        await repository.reserve(
+            request,
+            "tenant-isolation-key",
+            tenant_id="local",
+        )
+    await database.close()
