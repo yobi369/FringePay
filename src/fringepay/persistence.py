@@ -37,7 +37,7 @@ from fringepay.ledger import EntrySide, Journal
 from fringepay.reconciliation import SettlementLine, SettlementStatus
 from fringepay.service import CreatePayment
 
-LATEST_SCHEMA_REVISION = "0005_api_credentials"
+LATEST_SCHEMA_REVISION = "0006_settlement_reconciliation"
 
 
 class Base(DeclarativeBase):
@@ -78,6 +78,7 @@ class PaymentRow(Base):
             "tenant_id", "provider", "provider_reference",
             name="uq_payment_tenant_provider_reference",
         ),
+        UniqueConstraint("tenant_id", "id", name="uq_payments_tenant_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -241,6 +242,11 @@ class SettlementRecordRow(Base):
         ForeignKeyConstraint(
             ["tenant_id"], ["tenants.id"], ondelete="RESTRICT"
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "payment_id"],
+            ["payments.tenant_id", "payments.id"],
+            ondelete="RESTRICT",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -253,9 +259,7 @@ class SettlementRecordRow(Base):
     source_reference: Mapped[str] = mapped_column(String(128), nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
-    payment_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("payments.id", ondelete="RESTRICT")
-    )
+    payment_id: Mapped[str | None] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
