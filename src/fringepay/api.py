@@ -1,8 +1,6 @@
 """HTTP routes for sandbox payment operations."""
 
 import hashlib
-import hmac
-
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field, ValidationError
 
@@ -18,16 +16,18 @@ from fringepay.service import CreatePayment
 from fringepay.webhooks import InvalidWebhookSignature, verify_hmac_webhook
 
 
-def require_api_key(
+async def require_api_key(
+    request: Request,
     api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> None:
-    """Require a configured key; development has an explicit local-only key."""
-    settings = get_settings()
-    expected = settings.api_key
-    if expected is None and settings.environment != "production":
-        expected = "local-development-key"
-    if expected is None or api_key is None or not hmac.compare_digest(api_key, expected):
+    """Resolve a tenant from a hashed, revocable API credential."""
+    if api_key is None:
         raise HTTPException(status_code=401, detail="invalid or missing API key")
+    repository: PaymentRepository = request.app.state.repository
+    tenant_id = await repository.authenticate_api_key(api_key)
+    if tenant_id is None:
+        raise HTTPException(status_code=401, detail="invalid or missing API key")
+    request.state.tenant_id = tenant_id
 
 
 router = APIRouter(
@@ -78,7 +78,9 @@ async def create_payment(
         reference=body.reference,
     )
     try:
-        payment, _ = await repository.reserve(create_request, idempotency_key)
+        payment, _ = await repository.reserve(
+            create_request, idempotency_key, tenant_id=request.state.tenant_id
+        )
         claimed = await repository.claim_dispatch(payment.id)
         if claimed is not None:
             outbox_id, reserved_payment = claimed
@@ -102,7 +104,7 @@ async def create_payment(
                 provider_result.provider_reference,
             )
         else:
-            payment = await repository.get(payment.id) or payment
+            payment = await repository.get(payment.id, request.state.tenant_id) or payment
     except PersistentIdempotencyConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (KeyError, ValueError) as exc:
@@ -113,7 +115,7 @@ async def create_payment(
 @router.get("/{payment_id}", response_model=PaymentResponse)
 async def get_payment(payment_id: str, request: Request) -> PaymentResponse:
     repository: PaymentRepository = request.app.state.repository
-    payment = await repository.get(payment_id)
+    payment = await repository.get(payment_id, request.state.tenant_id)
     if payment is None:
         raise HTTPException(status_code=404, detail="payment not found")
     return PaymentResponse.from_domain(payment)
