@@ -31,6 +31,7 @@ external providers remain responsible for executing regulated payment rails.
 - Separate worker command for draining due outbox events (currently sandbox adapter only).
 - Double-entry journal validation and persistence with idempotent journal references and derived account balances.
 - API-key protection for payment routes, using constant-time comparison.
+- Timestamped HMAC-SHA256 verification and replay protection for sandbox provider callbacks.
 - Strict integer validation for monetary minor units.
 - Lifecycle transition validation and CI lint/test checks.
 
@@ -120,6 +121,8 @@ outbox events; it is designed to run as a separate process in a deployment.
 - `POST /v1/payments` — create a simulated payment. Requires `X-API-Key` and `Idempotency-Key`
   headers plus JSON body with `amount_minor`, `currency`, and `reference`.
 - `GET /v1/payments/{payment_id}` — retrieve a persisted payment; requires `X-API-Key`.
+- `POST /v1/webhooks/sandbox` — accept a signed sandbox status callback; requires
+  `X-Provider-Event-Id` and `X-FringePay-Signature`, not the client API key.
 
 Example:
 
@@ -132,6 +135,11 @@ curl -X POST http://127.0.0.1:8000/v1/payments \
 
 For KES, `amount_minor` is cents: KSh 10.50 is represented as 1050.
 
+The sandbox webhook secret is configured with `FRINGEPAY_SANDBOX_WEBHOOK_SECRET`. The signature
+header format is `t=<unix_timestamp>,v1=<hex_hmac_sha256>`, calculated over the timestamp, a dot,
+and the exact raw request body. The default timestamp tolerance is 300 seconds. This generic
+scheme is a sandbox contract, not a claim of compatibility with any specific provider signature.
+
 ## Development milestones
 
 1. Repository foundation, domain models, configuration, and CI.
@@ -139,7 +147,7 @@ For KES, `amount_minor` is cents: KSh 10.50 is represented as 1050.
 3. Durable payment storage, idempotency, API integration, and lifecycle state machine.
 4. Harden outbox recovery, provider idempotency, and PostgreSQL concurrency behavior.
 5. Link ledger postings to verified settlement/reconciliation evidence and enforce append-only controls.
-6. Signed webhook delivery, replay protection, and reconciliation.
+6. Provider webhook signature verification, durable event replay protection, and reconciliation.
 7. Tenant authentication, authorization, auditability, and operational controls.
 8. Authorized provider adapters in sandbox/test environments.
 9. Security, compliance, load, and failure-mode hardening before any live-money pilot.
