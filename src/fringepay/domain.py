@@ -1,7 +1,7 @@
 """Core payment domain types. Monetary values are integer minor units."""
+import re
 from dataclasses import dataclass
 from enum import StrEnum
-import re
 
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
 
