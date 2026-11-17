@@ -1,0 +1,1 @@
+"""FringePay payment orchestration foundation."""
