@@ -5,13 +5,16 @@ from uuid import uuid4
 from fringepay.domain import Money, Payment
 from fringepay.providers import PaymentCommand, PaymentProvider
 
+
 class IdempotencyConflict(Exception):
     """An idempotency key was reused with a different request."""
+
 
 @dataclass(frozen=True, slots=True)
 class CreatePayment:
     amount: Money
     reference: str
+
 
 class PaymentService:
     """In-memory service for local development only; not multi-worker safe."""
