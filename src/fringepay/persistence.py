@@ -34,7 +34,6 @@ from fringepay.domain import Money, Payment, PaymentStatus
 from fringepay.ledger import EntrySide, Journal
 from fringepay.service import CreatePayment
 
-
 LATEST_SCHEMA_REVISION = "0005_api_credentials"
 
 
