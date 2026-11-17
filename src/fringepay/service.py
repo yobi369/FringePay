@@ -15,6 +15,7 @@ class CreatePayment:
 
 class PaymentService:
     """In-memory service for local development only; not multi-worker safe."""
+
     def __init__(self, provider: PaymentProvider) -> None:
         self.provider = provider
         self._payments: dict[str, Payment] = {}
@@ -27,15 +28,23 @@ class PaymentService:
         if existing:
             previous_request, payment_id = existing
             if previous_request != request:
-                raise IdempotencyConflict("idempotency key was already used for another request")
+                raise IdempotencyConflict(
+                    "idempotency key was already used for another request"
+                )
             return self._payments[payment_id]
         payment_id = str(uuid4())
-        result = await self.provider.initiate(
-            PaymentCommand(payment_id=payment_id, amount=request.amount, reference=request.reference)
+        command = PaymentCommand(
+            payment_id=payment_id,
+            amount=request.amount,
+            reference=request.reference,
         )
+        result = await self.provider.initiate(command)
         payment = Payment(
-            id=payment_id, amount=request.amount, reference=request.reference,
-            provider=result.provider, provider_reference=result.provider_reference,
+            id=payment_id,
+            amount=request.amount,
+            reference=request.reference,
+            provider=result.provider,
+            provider_reference=result.provider_reference,
             status=result.status,
         )
         self._payments[payment.id] = payment
