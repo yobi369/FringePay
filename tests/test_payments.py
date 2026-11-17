@@ -2,11 +2,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fringepay.domain import Money, PaymentStatus
+from fringepay.config import get_settings
 from fringepay.main import app
 from fringepay.providers import SandboxOutcome, SandboxProvider
 from fringepay.service import CreatePayment, IdempotencyConflict, PaymentService
 
-client = TestClient(app)
+@pytest.fixture
+def api_client(tmp_path, monkeypatch):
+    database_path = tmp_path / "api.db"
+    monkeypatch.setenv("FRINGEPAY_DATABASE_URL", f"sqlite+aiosqlite:///{database_path}")
+    get_settings.cache_clear()
+    with TestClient(app) as test_client:
+        yield test_client
+    get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
@@ -56,16 +64,16 @@ async def test_service_rejects_status_update_for_unknown_payment() -> None:
         service.apply_provider_status("missing", PaymentStatus.SUCCEEDED)
 
 
-def test_create_payment_requires_idempotency_key() -> None:
-    response = client.post(
+def test_create_payment_requires_idempotency_key(api_client: TestClient) -> None:
+    response = api_client.post(
         "/v1/payments",
         json={"amount_minor": 1000, "currency": "KES", "reference": "order-1"},
     )
     assert response.status_code == 422
 
 
-def test_create_and_retrieve_sandbox_payment() -> None:
-    response = client.post(
+def test_create_and_retrieve_sandbox_payment(api_client: TestClient) -> None:
+    response = api_client.post(
         "/v1/payments",
         headers={"Idempotency-Key": "api-key-1"},
         json={"amount_minor": 1000, "currency": "KES", "reference": "order-api-1"},
@@ -74,6 +82,6 @@ def test_create_and_retrieve_sandbox_payment() -> None:
     body = response.json()
     assert body["provider"] == "sandbox"
     assert body["status"] == "pending"
-    fetched = client.get(f"/v1/payments/{body['id']}")
+    fetched = api_client.get(f"/v1/payments/{body['id']}")
     assert fetched.status_code == 200
     assert fetched.json()["id"] == body["id"]
