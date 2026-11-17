@@ -29,6 +29,7 @@ external providers remain responsible for executing regulated payment rails.
 - Alembic versioned schema migrations.
 - Transactional provider-dispatch outbox with atomic claims, retry scheduling, and expired-lease recovery.
 - Separate worker command for draining due outbox events (currently sandbox adapter only).
+- Double-entry journal validation and persistence with idempotent journal references and derived account balances.
 - Strict integer validation for monetary minor units.
 - Lifecycle transition validation and CI lint/test checks.
 
@@ -37,6 +38,8 @@ database transaction. A repeated request with the same key and payload returns t
 payment; a changed payload returns HTTP 409. The API and a separate worker compete for events
 using atomic database claims, and abandoned processing leases can be retried. Provider adapters
 must use the stable payment ID as their external idempotency reference before live integrations.
+The ledger is currently a separate journal subsystem: payment status changes do not automatically
+post ledger entries, and a sandbox result is never treated as settlement evidence.
 
 ## Planned architecture
 
@@ -131,7 +134,7 @@ For KES, `amount_minor` is cents: KSh 10.50 is represented as 1050.
 2. Provider interface and deterministic sandbox adapter.
 3. Durable payment storage, idempotency, API integration, and lifecycle state machine.
 4. Harden outbox recovery, provider idempotency, and PostgreSQL concurrency behavior.
-5. Immutable double-entry ledger with balance invariants.
+5. Link ledger postings to verified settlement/reconciliation evidence and enforce append-only controls.
 6. Signed webhook delivery, replay protection, and reconciliation.
 7. Tenant authentication, authorization, auditability, and operational controls.
 8. Authorized provider adapters in sandbox/test environments.
