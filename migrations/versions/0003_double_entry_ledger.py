@@ -37,6 +37,7 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "tenant_id", "reference", name="uq_ledger_tenant_reference"
         ),
+        sa.UniqueConstraint("tenant_id", "id", name="uq_ledger_tenant_id"),
     )
     op.create_table(
         "ledger_entries",
@@ -48,7 +49,9 @@ def upgrade() -> None:
         sa.Column("amount_minor", sa.BigInteger(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(
-            ["transaction_id"], ["ledger_transactions.id"], ondelete="RESTRICT"
+            ["tenant_id", "transaction_id"],
+            ["ledger_transactions.tenant_id", "ledger_transactions.id"],
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["tenant_id", "account_code"],
