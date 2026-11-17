@@ -478,6 +478,8 @@ class PaymentRepository:
                     )
                     if payment_row is None:
                         raise KeyError(f"payment not found: {payment_id}")
+                    if payment_row.provider != provider:
+                        raise ValueError("webhook provider does not match payment provider")
                     current = self._to_domain(payment_row)
                     updated = current.transition_to(new_status)
                     payment_row.status = updated.status.value
