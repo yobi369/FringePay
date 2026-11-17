@@ -10,16 +10,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_unique_constraint(
-        "uq_payment_tenant_provider_reference",
-        "payments",
-        ["tenant_id", "provider", "provider_reference"],
-    )
-    op.create_unique_constraint(
-        "uq_payments_tenant_id",
-        "payments",
-        ["tenant_id", "id"],
-    )
     op.create_table(
         "settlement_records",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -53,9 +43,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("settlement_records")
-    op.drop_constraint(
-        "uq_payments_tenant_id", "payments", type_="unique"
-    )
-    op.drop_constraint(
-        "uq_payment_tenant_provider_reference", "payments", type_="unique"
-    )
