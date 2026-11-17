@@ -8,6 +8,7 @@ from fringepay.service import CreatePayment, IdempotencyConflict, PaymentService
 
 client = TestClient(app)
 
+
 @pytest.mark.asyncio
 async def test_service_returns_same_payment_for_same_idempotent_request() -> None:
     service = PaymentService(SandboxProvider())
@@ -17,12 +18,14 @@ async def test_service_returns_same_payment_for_same_idempotent_request() -> Non
     assert first.id == second.id
     assert first.status is PaymentStatus.PENDING
 
+
 @pytest.mark.asyncio
 async def test_service_rejects_idempotency_key_reuse_with_different_payload() -> None:
     service = PaymentService(SandboxProvider())
     await service.create(CreatePayment(Money(2500, "KES"), "order-42"), "key-1")
     with pytest.raises(IdempotencyConflict):
         await service.create(CreatePayment(Money(3500, "KES"), "order-42"), "key-1")
+
 
 @pytest.mark.asyncio
 async def test_sandbox_can_simulate_success_without_real_money() -> None:
@@ -31,12 +34,35 @@ async def test_sandbox_can_simulate_success_without_real_money() -> None:
     assert payment.status is PaymentStatus.SUCCEEDED
     assert payment.provider == "sandbox"
 
+
+@pytest.mark.asyncio
+async def test_service_applies_only_valid_provider_status_transitions() -> None:
+    service = PaymentService(SandboxProvider())
+    payment = await service.create(
+        CreatePayment(Money(100, "KES"), "lifecycle-test"), "lifecycle-key"
+    )
+    processing = service.apply_provider_status(payment.id, PaymentStatus.PROCESSING)
+    assert processing.status is PaymentStatus.PROCESSING
+    succeeded = service.apply_provider_status(payment.id, PaymentStatus.SUCCEEDED)
+    assert succeeded.status is PaymentStatus.SUCCEEDED
+    with pytest.raises(ValueError, match="cannot transition"):
+        service.apply_provider_status(payment.id, PaymentStatus.PENDING)
+
+
+@pytest.mark.asyncio
+async def test_service_rejects_status_update_for_unknown_payment() -> None:
+    service = PaymentService(SandboxProvider())
+    with pytest.raises(KeyError, match="payment not found"):
+        service.apply_provider_status("missing", PaymentStatus.SUCCEEDED)
+
+
 def test_create_payment_requires_idempotency_key() -> None:
     response = client.post(
         "/v1/payments",
         json={"amount_minor": 1000, "currency": "KES", "reference": "order-1"},
     )
     assert response.status_code == 422
+
 
 def test_create_and_retrieve_sandbox_payment() -> None:
     response = client.post(
