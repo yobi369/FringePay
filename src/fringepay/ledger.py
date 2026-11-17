@@ -21,6 +21,8 @@ class LedgerLine:
     def __post_init__(self) -> None:
         if not self.account_code or len(self.account_code) > 64:
             raise ValueError("ledger account code must contain 1 to 64 characters")
+        if not isinstance(self.side, EntrySide):
+            raise ValueError("ledger entry side must be debit or credit")
         if (
             isinstance(self.amount_minor, bool)
             or not isinstance(self.amount_minor, int)
