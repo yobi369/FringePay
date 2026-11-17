@@ -159,6 +159,7 @@ class LedgerTransactionRow(Base):
         ForeignKeyConstraint(
             ["tenant_id"], ["tenants.id"], ondelete="RESTRICT"
         ),
+        UniqueConstraint("tenant_id", "id", name="uq_ledger_tenant_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -176,7 +177,9 @@ class LedgerEntryRow(Base):
     __tablename__ = "ledger_entries"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["transaction_id"], ["ledger_transactions.id"], ondelete="RESTRICT"
+            ["tenant_id", "transaction_id"],
+            ["ledger_transactions.tenant_id", "ledger_transactions.id"],
+            ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "account_code"],
