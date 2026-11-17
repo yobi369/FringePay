@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from uuid import uuid4
 
-from fringepay.domain import Money, Payment
+from fringepay.domain import Money, Payment, PaymentStatus
 from fringepay.providers import PaymentCommand, PaymentProvider
 
 
@@ -53,6 +53,17 @@ class PaymentService:
         self._payments[payment.id] = payment
         self._idempotency[idempotency_key] = (request, payment.id)
         return payment
+
+    def apply_provider_status(
+        self, payment_id: str, new_status: PaymentStatus
+    ) -> Payment:
+        """Apply a provider status update only when lifecycle rules allow it."""
+        payment = self.get(payment_id)
+        if payment is None:
+            raise KeyError(f"payment not found: {payment_id}")
+        updated = payment.transition_to(new_status)
+        self._payments[payment_id] = updated
+        return updated
 
     def get(self, payment_id: str) -> Payment | None:
         return self._payments.get(payment_id)
