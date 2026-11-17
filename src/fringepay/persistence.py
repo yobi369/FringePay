@@ -292,6 +292,10 @@ class PaymentRepository:
                         row = await session.get(PaymentRow, existing.payment_id)
                         if row is None:
                             raise RuntimeError("idempotency record has no payment")
+                        if row.tenant_id != tenant_id:
+                            raise PersistentIdempotencyConflict(
+                                "idempotency key is already in use"
+                            )
                         return self._to_domain(row), False
 
                     payment_id = str(uuid4())
@@ -339,6 +343,10 @@ class PaymentRepository:
                 row = await session.get(PaymentRow, existing.payment_id)
                 if row is None:
                     raise RuntimeError("idempotency record has no payment") from None
+                if row.tenant_id != tenant_id:
+                    raise PersistentIdempotencyConflict(
+                        "idempotency key is already in use"
+                    ) from None
                 return self._to_domain(row), False
 
     async def apply_provider_result(
