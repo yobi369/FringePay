@@ -30,6 +30,7 @@ def test_initial_migration_creates_expected_tables(
             "ledger_accounts",
             "ledger_transactions",
             "ledger_entries",
+            "provider_webhook_events",
             "alembic_version",
         }
         assert expected <= table_names
