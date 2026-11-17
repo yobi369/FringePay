@@ -23,7 +23,15 @@ def test_initial_migration_creates_expected_tables(
             table_names = set(inspect(engine).get_table_names())
         finally:
             engine.dispose()
-        expected = {"payments", "idempotency_keys", "provider_dispatch_outbox", "alembic_version"}
+        expected = {
+            "payments",
+            "idempotency_keys",
+            "provider_dispatch_outbox",
+            "ledger_accounts",
+            "ledger_transactions",
+            "ledger_entries",
+            "alembic_version",
+        }
         assert expected <= table_names
     finally:
         get_settings.cache_clear()
