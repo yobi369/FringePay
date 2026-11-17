@@ -1,7 +1,8 @@
 """Create payment and idempotency tables."""
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0001_payment_storage"
 down_revision = None
