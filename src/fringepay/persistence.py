@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -188,7 +189,7 @@ class PaymentRepository:
                 row.provider_reference = provider_reference
                 row.updated_at = datetime.now(UTC)
                 await session.flush()
-                return updated
+                return replace(updated, provider_reference=provider_reference)
 
     async def get(self, payment_id: str) -> Payment | None:
         async with self.database.sessions() as session:
