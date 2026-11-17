@@ -123,6 +123,8 @@ async def test_tenant_credentials_isolate_payment_reads(tmp_path: Path) -> None:
     tenant_id, tenant_key = await repository.create_tenant("Merchant Alpha")
     assert await repository.authenticate_api_key("local-development-key") == "local"
     assert await repository.authenticate_api_key(tenant_key) == tenant_id
+    assert await repository.revoke_api_key(tenant_id, tenant_key[:24]) is True
+    assert await repository.authenticate_api_key(tenant_key) is None
 
     request = CreatePayment(Money(2300, "KES"), "tenant-isolation-order")
     payment, created = await repository.reserve(
