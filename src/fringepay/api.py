@@ -55,20 +55,31 @@ async def create_payment(
         reference=body.reference,
     )
     try:
-        payment, created = await repository.reserve(create_request, idempotency_key)
-        if created:
-            provider_result = await sandbox_provider.initiate(
-                PaymentCommand(
-                    payment_id=payment.id,
-                    amount=create_request.amount,
-                    reference=create_request.reference,
+        payment, _ = await repository.reserve(create_request, idempotency_key)
+        claimed = await repository.claim_dispatch(payment.id)
+        if claimed is not None:
+            outbox_id, reserved_payment = claimed
+            try:
+                provider_result = await sandbox_provider.initiate(
+                    PaymentCommand(
+                        payment_id=reserved_payment.id,
+                        amount=reserved_payment.amount,
+                        reference=reserved_payment.reference,
+                    )
                 )
-            )
-            payment = await repository.apply_provider_result(
-                payment.id,
+            except Exception as exc:
+                await repository.retry_dispatch(outbox_id, "provider_dispatch_failed")
+                raise HTTPException(
+                    status_code=503,
+                    detail="payment dispatch is temporarily unavailable",
+                ) from exc
+            payment = await repository.complete_dispatch(
+                outbox_id,
                 provider_result.status,
                 provider_result.provider_reference,
             )
+        else:
+            payment = await repository.get(payment.id) or payment
     except PersistentIdempotencyConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (KeyError, ValueError) as exc:
