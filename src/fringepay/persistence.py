@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import hmac
+import secrets
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -36,10 +38,40 @@ class Base(DeclarativeBase):
     """Base metadata for FringePay persistence models."""
 
 
+class TenantRow(Base):
+    __tablename__ = "tenants"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+
+class ApiCredentialRow(Base):
+    __tablename__ = "api_credentials"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+    )
+    key_prefix: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class PaymentRow(Base):
     __tablename__ = "payments"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+    )
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     reference: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -60,6 +92,9 @@ class PaymentRow(Base):
 class IdempotencyRow(Base):
     __tablename__ = "idempotency_keys"
 
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenants.id", ondelete="RESTRICT"), primary_key=True
+    )
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     payment_id: Mapped[str] = mapped_column(
@@ -169,12 +204,33 @@ class Database:
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
 
     async def create_schema(self) -> None:
-        """Create tables for local development and tests.
-
-        Production schema changes must be applied through versioned migrations.
-        """
+        """Create and seed local development schema; deployments use migrations."""
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+        async with self.sessions() as session:
+            async with session.begin():
+                tenant = await session.get(TenantRow, "local")
+                if tenant is None:
+                    session.add(TenantRow(id="local", name="Local Development"))
+                    await session.flush()
+                local_key_hash = hashlib.sha256(
+                    b"local-development-key"
+                ).hexdigest()
+                credential = await session.scalar(
+                    select(ApiCredentialRow).where(
+                        ApiCredentialRow.key_hash == local_key_hash
+                    )
+                )
+                if credential is None:
+                    session.add(
+                        ApiCredentialRow(
+                            id=str(uuid4()),
+                            tenant_id="local",
+                            key_prefix="local-development-key",
+                            key_hash=local_key_hash,
+                            label="Local development key",
+                        )
+                    )
 
     async def close(self) -> None:
         await self.engine.dispose()
@@ -212,6 +268,7 @@ class PaymentRepository:
         request: CreatePayment,
         idempotency_key: str,
         provider: str = "sandbox",
+        tenant_id: str = "local",
     ) -> tuple[Payment, bool]:
         """Persist a payment reservation once; return (payment, newly_created).
 
@@ -224,7 +281,9 @@ class PaymentRepository:
         try:
             async with self.database.sessions() as session:
                 async with session.begin():
-                    existing = await session.get(IdempotencyRow, idempotency_key)
+                    existing = await session.get(
+                        IdempotencyRow, (tenant_id, idempotency_key)
+                    )
                     if existing is not None:
                         if existing.request_hash != request_hash:
                             raise PersistentIdempotencyConflict(
@@ -238,6 +297,7 @@ class PaymentRepository:
                     payment_id = str(uuid4())
                     row = PaymentRow(
                         id=payment_id,
+                        tenant_id=tenant_id,
                         amount_minor=request.amount.minor_units,
                         currency=request.amount.currency,
                         reference=request.reference,
@@ -249,6 +309,7 @@ class PaymentRepository:
                     await session.flush()
                     session.add(
                         IdempotencyRow(
+                            tenant_id=tenant_id,
                             key=idempotency_key,
                             request_hash=request_hash,
                             payment_id=payment_id,
@@ -266,7 +327,9 @@ class PaymentRepository:
         except IntegrityError:
             # A competing transaction may have inserted the same key first.
             async with self.database.sessions() as session:
-                existing = await session.get(IdempotencyRow, idempotency_key)
+                existing = await session.get(
+                    IdempotencyRow, (tenant_id, idempotency_key)
+                )
                 if existing is None:
                     raise
                 if existing.request_hash != request_hash:
@@ -634,7 +697,56 @@ class PaymentRepository:
                 return int(debit_total) - int(credit_total)
             return int(credit_total) - int(debit_total)
 
-    async def get(self, payment_id: str) -> Payment | None:
+    async def get(
+        self, payment_id: str, tenant_id: str = "local"
+    ) -> Payment | None:
         async with self.database.sessions() as session:
-            row = await session.get(PaymentRow, payment_id)
+            row = await session.scalar(
+                select(PaymentRow).where(
+                    PaymentRow.id == payment_id,
+                    PaymentRow.tenant_id == tenant_id,
+                )
+            )
             return self._to_domain(row) if row is not None else None
+
+    async def authenticate_api_key(self, api_key: str) -> str | None:
+        if not api_key:
+            return None
+        key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+        prefix = api_key[:24]
+        async with self.database.sessions() as session:
+            credentials = (
+                await session.scalars(
+                    select(ApiCredentialRow).where(
+                        ApiCredentialRow.key_prefix == prefix,
+                        ApiCredentialRow.revoked_at.is_(None),
+                    )
+                )
+            ).all()
+            for credential in credentials:
+                if hmac.compare_digest(credential.key_hash, key_hash):
+                    tenant = await session.get(TenantRow, credential.tenant_id)
+                    if tenant is not None and tenant.status == "active":
+                        return tenant.id
+        return None
+
+    async def create_tenant(self, name: str) -> tuple[str, str]:
+        if not name.strip() or len(name) > 128:
+            raise ValueError("tenant name must contain 1 to 128 characters")
+        tenant_id = str(uuid4())
+        api_key = "fp_live_" + secrets.token_urlsafe(32)
+        key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+        async with self.database.sessions() as session:
+            async with session.begin():
+                session.add(TenantRow(id=tenant_id, name=name.strip()))
+                await session.flush()
+                session.add(
+                    ApiCredentialRow(
+                        id=str(uuid4()),
+                        tenant_id=tenant_id,
+                        key_prefix=api_key[:24],
+                        key_hash=key_hash,
+                        label="Initial API key",
+                    )
+                )
+        return tenant_id, api_key
