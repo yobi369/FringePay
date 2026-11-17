@@ -14,7 +14,6 @@ from fringepay.webhooks import (
     verify_hmac_webhook,
 )
 
-
 SECRET = "test-webhook-secret"
 
 
