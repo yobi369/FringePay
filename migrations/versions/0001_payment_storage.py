@@ -1,4 +1,6 @@
-"""Create payment and idempotency tables."""
+"""Create tenant, payment, and idempotency tables."""
+
+import datetime
 
 import sqlalchemy as sa
 from alembic import op
@@ -11,8 +13,32 @@ depends_on = None
 
 def upgrade() -> None:
     op.create_table(
+        "tenants",
+        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("name", sa.String(length=128), nullable=False),
+        sa.Column("status", sa.String(length=16), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    )
+    tenants = sa.table(
+        "tenants",
+        sa.column("id", sa.String()),
+        sa.column("name", sa.String()),
+        sa.column("status", sa.String()),
+        sa.column("created_at", sa.DateTime(timezone=True)),
+    )
+    op.bulk_insert(
+        tenants,
+        [{
+            "id": "local",
+            "name": "Local Development",
+            "status": "active",
+            "created_at": datetime.datetime.now(datetime.UTC),
+        }],
+    )
+    op.create_table(
         "payments",
         sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("tenant_id", sa.String(length=36), nullable=False),
         sa.Column("amount_minor", sa.BigInteger(), nullable=False),
         sa.Column("currency", sa.String(length=3), nullable=False),
         sa.Column("reference", sa.String(length=128), nullable=False),
@@ -21,6 +47,9 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=20), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"], ["tenants.id"], ondelete="RESTRICT"
+        ),
     )
     op.create_table(
         "idempotency_keys",
@@ -38,3 +67,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table("idempotency_keys")
     op.drop_table("payments")
+    op.drop_table("tenants")
