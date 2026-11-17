@@ -14,7 +14,6 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
-    case,
     func,
     select,
     update,
@@ -420,7 +419,12 @@ class PaymentRepository:
     ) -> None:
         if not code or len(code) > 64 or not name or len(name) > 128:
             raise ValueError("ledger account code and name are required")
-        if len(currency) != 3 or not currency.isupper():
+        if (
+            not currency.isascii()
+            or len(currency) != 3
+            or not currency.isalpha()
+            or not currency.isupper()
+        ):
             raise ValueError("ledger account currency must be uppercase ISO code")
         async with self.database.sessions() as session:
             async with session.begin():
