@@ -4,7 +4,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from fringepay.api import router as payments_router, webhook_router
+from fringepay.api import router as payments_router
+from fringepay.api import webhook_router
 from fringepay.config import get_settings
 from fringepay.persistence import Database, PaymentRepository
 
