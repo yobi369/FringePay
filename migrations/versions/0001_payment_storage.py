@@ -50,6 +50,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["tenant_id"], ["tenants.id"], ondelete="RESTRICT"
         ),
+        sa.UniqueConstraint(
+            "tenant_id", "provider", "provider_reference",
+            name="uq_payment_tenant_provider_reference",
+        ),
+        sa.UniqueConstraint("tenant_id", "id", name="uq_payments_tenant_id"),
     )
     op.create_table(
         "idempotency_keys",
