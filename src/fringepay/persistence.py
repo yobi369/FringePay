@@ -687,7 +687,9 @@ class PaymentRepository:
                         return existing.id, False
 
                     for line in journal.lines:
-                        account = await session.get(LedgerAccountRow, (tenant_id, line.account_code))
+                        account = await session.get(
+                            LedgerAccountRow, (tenant_id, line.account_code)
+                        )
                         if account is None:
                             raise ValueError(
                                 f"ledger account does not exist: {line.account_code}"
