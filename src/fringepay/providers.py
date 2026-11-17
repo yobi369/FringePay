@@ -19,6 +19,7 @@ class ProviderResult:
 
 class PaymentProvider(Protocol):
     name: str
+
     async def initiate(self, command: PaymentCommand) -> ProviderResult:
         """Initiate a payment through this provider."""
 
