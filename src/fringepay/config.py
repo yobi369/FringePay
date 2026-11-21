@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     daraja_shortcode: str | None = None
     daraja_passkey: str | None = None
     daraja_callback_url: str | None = None
+    daraja_callback_secret: str | None = None
     daraja_transaction_type: str = "CustomerPayBillOnline"
 
     model_config = SettingsConfigDict(
