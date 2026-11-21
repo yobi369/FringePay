@@ -1,4 +1,4 @@
-"""HTTP routes for sandbox payment operations."""
+"""HTTP routes for asynchronous sandbox payment operations."""
 
 import hashlib
 
@@ -12,7 +12,6 @@ from fringepay.persistence import (
     PersistentIdempotencyConflict,
     WebhookReplayConflict,
 )
-from fringepay.providers import PaymentCommand, SandboxProvider
 from fringepay.service import CreatePayment
 from fringepay.webhooks import InvalidWebhookSignature, verify_hmac_webhook
 
@@ -36,7 +35,6 @@ router = APIRouter(
     tags=["payments"],
     dependencies=[Depends(require_api_key)],
 )
-sandbox_provider = SandboxProvider()
 
 
 class CreatePaymentBody(BaseModel):
@@ -67,12 +65,17 @@ class PaymentResponse(BaseModel):
         )
 
 
-@router.post("", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=PaymentResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_payment(
     body: CreatePaymentBody,
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
 ) -> PaymentResponse:
+    """Reserve a payment and enqueue dispatch; provider I/O is worker-only.
+
+    Returning after the durable reservation prevents a slow or unavailable provider
+    from holding an HTTP request open. The outbox worker owns all provider dispatch.
+    """
     repository: PaymentRepository = request.app.state.repository
     create_request = CreatePayment(
         amount=Money(minor_units=body.amount_minor, currency=body.currency),
@@ -82,30 +85,6 @@ async def create_payment(
         payment, _ = await repository.reserve(
             create_request, idempotency_key, tenant_id=request.state.tenant_id
         )
-        claimed = await repository.claim_dispatch(payment.id)
-        if claimed is not None:
-            outbox_id, reserved_payment = claimed
-            try:
-                provider_result = await sandbox_provider.initiate(
-                    PaymentCommand(
-                        payment_id=reserved_payment.id,
-                        amount=reserved_payment.amount,
-                        reference=reserved_payment.reference,
-                    )
-                )
-            except Exception as exc:
-                await repository.retry_dispatch(outbox_id, "provider_dispatch_failed")
-                raise HTTPException(
-                    status_code=503,
-                    detail="payment dispatch is temporarily unavailable",
-                ) from exc
-            payment = await repository.complete_dispatch(
-                outbox_id,
-                provider_result.status,
-                provider_result.provider_reference,
-            )
-        else:
-            payment = await repository.get(payment.id, request.state.tenant_id) or payment
     except PersistentIdempotencyConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (KeyError, ValueError) as exc:
