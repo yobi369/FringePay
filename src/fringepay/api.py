@@ -142,7 +142,10 @@ async def receive_daraja_webhook(request: Request) -> dict[str, str | bool]:
         # Acknowledge unknown callbacks without exposing whether a payment exists.
         return {"accepted": True, "matched": False, "status": "unmatched"}
 
-    provider = DarajaProvider(settings)
+    try:
+        provider = DarajaProvider(settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail="Daraja callback verification is not configured") from exc
     try:
         verified_status = await provider.query_stk_status(checkout_request_id)
     except ProviderTemporaryError:
