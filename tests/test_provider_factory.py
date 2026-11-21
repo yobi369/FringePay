@@ -1,5 +1,5 @@
-from cryptography.fernet import Fernet
 import pytest
+from cryptography.fernet import Fernet
 
 from fringepay.config import Settings
 from fringepay.provider_factory import validate_provider_settings
