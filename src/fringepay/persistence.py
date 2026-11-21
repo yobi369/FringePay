@@ -1066,7 +1066,7 @@ class PaymentRepository:
         if not name.strip() or len(name) > 128:
             raise ValueError("tenant name must contain 1 to 128 characters")
         tenant_id = str(uuid4())
-        api_key = "fp_live_" + secrets.token_urlsafe(32)
+        api_key = "fp_test_" + secrets.token_urlsafe(32)
         key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
         async with self.database.sessions() as session:
             async with session.begin():
