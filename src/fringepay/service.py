@@ -14,6 +14,7 @@ class IdempotencyConflict(Exception):
 class CreatePayment:
     amount: Money
     reference: str
+    phone_number: str | None = None
 
 
 class PaymentService:
