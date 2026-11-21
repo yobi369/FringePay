@@ -98,3 +98,38 @@ async def test_worker_quarantines_unknown_provider_outcome_without_retry(
     assert updated.status is PaymentStatus.PROCESSING
     assert await dispatch_one(repository, SandboxProvider()) is False
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_expired_daraja_dispatch_lease_is_quarantined_not_retried(
+    tmp_path: Path,
+) -> None:
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'daraja-lease.db'}")
+    await database.create_schema()
+    repository = PaymentRepository(database)
+    payment, _ = await repository.reserve(
+        CreatePayment(
+            Money(5000, "KES"),
+            "daraja-expired-order",
+            phone_number="254712345678",
+        ),
+        "daraja-expired-key",
+        provider="daraja",
+    )
+    claimed = await repository.claim_dispatch(payment.id)
+    assert claimed is not None
+
+    async with database.sessions() as session:
+        async with session.begin():
+            event = await session.get(ProviderDispatchOutboxRow, claimed[0])
+            assert event is not None
+            event.locked_at = datetime.now(UTC) - timedelta(minutes=2)
+
+    handled = await dispatch_one(repository, SandboxProvider())
+    updated = await repository.get(payment.id)
+
+    assert handled is False
+    assert updated is not None
+    assert updated.status is PaymentStatus.PROCESSING
+    assert await repository.claim_dispatch(payment.id) is None
+    await database.close()
