@@ -21,7 +21,7 @@ Start in Kenya with M-Pesa through an approved Daraja integration, then expand t
 - Optional Fernet encryption for stored customer phone numbers; production requires a PII encryption key.
 - Durable tenant-scoped idempotency with payload-conflict detection.
 - Transactional provider-dispatch outbox with atomic claims, bounded exponential retries, dead-letter handling, and expired-lease recovery.
-- Separate worker command for dispatching outbox events (sandbox adapter only).
+- Separate worker command for dispatching outbox events through the selected sandbox provider adapter.
 - Payment lifecycle transition validation.
 - Double-entry journal validation and tenant-scoped persistence with idempotent journal references and derived account balances.
 - Tenant-scoped settlement matching with duplicate detection and matched, pending, unmatched, and mismatch outcomes.
