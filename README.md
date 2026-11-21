@@ -111,7 +111,7 @@ The sandbox webhook secret is configured with FRINGEPAY_SANDBOX_WEBHOOK_SECRET. 
 
 ## Launch milestones
 
-See the Kenya MVP launch plan at docs/launch/kenya-mvp-plan.md for the release stages, acceptance criteria, and payment safety invariants.
+See the Kenya MVP launch plan at docs/launch/kenya-mvp-plan.md for the release stages, acceptance criteria, and payment safety invariants. The Daraja sandbox setup and STK Push flow are documented in docs/integrations/daraja-sandbox.md.
 
 ## Safety and scope
 
