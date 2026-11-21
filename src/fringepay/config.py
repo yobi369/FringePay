@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./fringepay.db"
     sandbox_webhook_secret: str | None = None
     webhook_tolerance_seconds: int = 300
+    pii_encryption_key: str | None = None
     default_provider: str = "sandbox"
     daraja_environment: str = "sandbox"
     daraja_consumer_key: str | None = None
