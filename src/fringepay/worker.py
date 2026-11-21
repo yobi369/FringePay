@@ -6,8 +6,16 @@ import asyncio
 import logging
 
 from fringepay.config import get_settings
+from fringepay.domain import PaymentStatus
 from fringepay.persistence import Database, PaymentRepository
-from fringepay.providers import PaymentCommand, PaymentProvider, SandboxProvider
+from fringepay.provider_factory import build_provider
+from fringepay.providers import (
+    PaymentCommand,
+    PaymentProvider,
+    ProviderOutcomeUnknown,
+    ProviderRejected,
+    ProviderTemporaryError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +34,25 @@ async def dispatch_one(
         payment_id=payment.id,
         amount=payment.amount,
         reference=payment.reference,
+        phone_number=payment.phone_number,
     )
     try:
         result = await provider.initiate(command)
+    except ProviderRejected:
+        await repository.complete_dispatch(outbox_id, PaymentStatus.FAILED, None)
+        logger.warning("Provider definitively rejected payment initiation")
+        return True
+    except ProviderTemporaryError:
+        await repository.retry_dispatch(outbox_id, "provider_temporarily_unavailable")
+        logger.warning("Provider unavailable before payment submission; retry scheduled")
+        return True
+    except ProviderOutcomeUnknown:
+        await repository.mark_dispatch_unknown(outbox_id, "provider_outcome_unknown")
+        logger.error("Provider outcome unknown; automatic retry disabled")
+        return True
     except Exception:
-        await repository.retry_dispatch(outbox_id, "provider_dispatch_failed")
-        logger.error("Provider dispatch failed; event scheduled for retry")
+        await repository.mark_dispatch_unknown(outbox_id, "provider_unclassified_error")
+        logger.exception("Unclassified provider error; automatic retry disabled")
         return True
 
     await repository.complete_dispatch(
@@ -48,13 +69,16 @@ async def run_worker(poll_interval_seconds: float = 1.0) -> None:
     if settings.environment != "production":
         await database.create_schema()
     repository = PaymentRepository(database)
-    provider = SandboxProvider()
+    provider = build_provider(settings)
     try:
         while True:
             did_work = await dispatch_one(repository, provider)
             if not did_work:
                 await asyncio.sleep(poll_interval_seconds)
     finally:
+        close_provider = getattr(provider, "aclose", None)
+        if close_provider is not None:
+            await close_provider()
         await database.close()
 
 
