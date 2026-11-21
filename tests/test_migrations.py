@@ -20,7 +20,9 @@ def test_initial_migration_creates_expected_tables(
         command.upgrade(Config("alembic.ini"), "head")
         engine = create_engine(f"sqlite:///{database_path}")
         try:
-            table_names = set(inspect(engine).get_table_names())
+            inspector = inspect(engine)
+            table_names = set(inspector.get_table_names())
+            payment_columns = {column["name"] for column in inspector.get_columns("payments")}
         finally:
             engine.dispose()
         expected = {
@@ -37,5 +39,6 @@ def test_initial_migration_creates_expected_tables(
             "alembic_version",
         }
         assert expected <= table_names
+        assert "phone_number" in payment_columns
     finally:
         get_settings.cache_clear()

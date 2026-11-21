@@ -4,7 +4,7 @@
 
 FringePay provides one API and operational layer for applications and merchants integrating with multiple authorized payment providers. Providers execute the regulated payment rails; FringePay manages payment orchestration, transaction state, idempotency, webhooks, ledgering, reconciliation, and operational controls.
 
-> **Current release status: sandbox-only engineering release candidate.** No live provider adapter or live-money processing is enabled. The current API reserves payments and queues durable dispatch work; the separate worker is the only component that calls a provider adapter.
+> **Current release status: sandbox-only engineering release candidate.** A Daraja STK Push sandbox adapter is implemented, but no live provider endpoint or live-money processing is enabled. The API reserves payments and queues durable dispatch work; the separate worker is the only component that calls a provider adapter.
 
 ## Product direction
 
@@ -13,10 +13,12 @@ Start in Kenya with M-Pesa through an approved Daraja integration, then expand t
 ## Implemented foundation
 
 - FastAPI payment creation and retrieval endpoints.
-- Deterministic sandbox provider adapter; no real payment rail is called.
+- Deterministic sandbox adapter and Daraja STK Push sandbox adapter; no live payment rail is called.
+- Daraja OAuth, STK Push initiation, callback-token validation, authenticated status query, and worker-side polling of unresolved checkouts.
 - SQLAlchemy 2 async persistence and Alembic migrations.
 - PostgreSQL support and SQLite local development support.
 - Tenant-scoped API credentials stored as SHA-256 hashes, revocation, and tenant-isolated payment reads.
+- Optional Fernet encryption for stored customer phone numbers; production requires a PII encryption key.
 - Durable tenant-scoped idempotency with payload-conflict detection.
 - Transactional provider-dispatch outbox with atomic claims, bounded exponential retries, dead-letter handling, and expired-lease recovery.
 - Separate worker command for dispatching outbox events (sandbox adapter only).
@@ -97,9 +99,10 @@ In a second terminal, run fringepay-worker to drain pending sandbox outbox event
 - GET /health — process health only; it does not prove database/provider readiness.
 - GET /ready — checks connectivity to the configured database.
 - GET /v1/status — confirms sandbox-only mode.
-- POST /v1/payments — reserve a sandbox payment and queue dispatch; returns HTTP 202. Requires X-API-Key and Idempotency-Key headers plus JSON body with amount_minor, currency, and reference.
+- POST /v1/payments — reserve a payment and queue dispatch; returns HTTP 202. Requires X-API-Key and Idempotency-Key headers plus JSON body with amount_minor, currency, and reference. Daraja requests also require phone_number.
 - GET /v1/payments/{payment_id} — retrieve a persisted payment; requires X-API-Key.
 - POST /v1/webhooks/sandbox — accept a signed sandbox status callback; requires X-Provider-Event-Id and X-FringePay-Signature, not the client API key.
+- POST /v1/webhooks/daraja — receive a Daraja callback; requires the shared token in the callback URL, then verifies status using Daraja query credentials.
 
 Example request:
 
@@ -111,7 +114,7 @@ The sandbox webhook secret is configured with FRINGEPAY_SANDBOX_WEBHOOK_SECRET. 
 
 ## Launch milestones
 
-See the Kenya MVP launch plan at docs/launch/kenya-mvp-plan.md for the release stages, acceptance criteria, and payment safety invariants.
+See the Kenya MVP launch plan at docs/launch/kenya-mvp-plan.md for the release stages, acceptance criteria, and payment safety invariants. The Daraja sandbox setup and STK Push flow are documented in docs/integrations/daraja-sandbox.md.
 
 ## Safety and scope
 

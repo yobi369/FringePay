@@ -1,11 +1,14 @@
 from pathlib import Path
 
 import pytest
+from cryptography.fernet import Fernet
 
+from fringepay.config import get_settings
 from fringepay.domain import Money, PaymentStatus
 from fringepay.persistence import (
     Database,
     PaymentRepository,
+    PaymentRow,
     PersistentIdempotencyConflict,
     ProviderDispatchOutboxRow,
 )
@@ -123,6 +126,7 @@ async def test_tenant_credentials_isolate_payment_reads(tmp_path: Path) -> None:
     repository = PaymentRepository(database)
     tenant_id, tenant_key = await repository.create_tenant("Merchant Alpha")
     assert await repository.authenticate_api_key("local-development-key") == "local"
+    assert tenant_key.startswith("fp_test_")
     assert await repository.authenticate_api_key(tenant_key) == tenant_id
     assert await repository.revoke_api_key(tenant_id, tenant_key[:24]) is True
     assert await repository.authenticate_api_key(tenant_key) is None
@@ -171,3 +175,87 @@ async def test_outbox_dead_letters_after_maximum_attempts(tmp_path: Path) -> Non
     status = await repository.outbox_status(outbox_id)
     assert status == ("dead_letter", 12, "provider_dispatch_failed")
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_payment_phone_number_is_persisted_and_bound_to_idempotency(
+    tmp_path: Path,
+) -> None:
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'phone.db'}")
+    await database.create_schema()
+    repository = PaymentRepository(database)
+    request = CreatePayment(
+        Money(2500, "KES"),
+        "phone-payment-order",
+        phone_number="254712345678",
+    )
+
+    payment, created = await repository.reserve(
+        request, "phone-payment-key", provider="daraja"
+    )
+    assert created is True
+    assert payment.phone_number == "254712345678"
+
+    fetched = await repository.get(payment.id)
+    assert fetched is not None
+    assert fetched.phone_number == "254712345678"
+
+    with pytest.raises(PersistentIdempotencyConflict):
+        await repository.reserve(
+            CreatePayment(
+                Money(2500, "KES"),
+                "phone-payment-order",
+                phone_number="254712345679",
+            ),
+            "phone-payment-key",
+            provider="daraja",
+        )
+    await database.close()
+
+
+@pytest.mark.asyncio
+async def test_phone_number_is_encrypted_at_rest_when_key_is_configured(
+    tmp_path: Path, monkeypatch
+) -> None:
+    key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("FRINGEPAY_PII_ENCRYPTION_KEY", key)
+    get_settings.cache_clear()
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'encrypted-phone.db'}")
+    await database.create_schema()
+    repository = PaymentRepository(database)
+    payment, _ = await repository.reserve(
+        CreatePayment(
+            Money(1000, "KES"),
+            "encrypted-phone-order",
+            phone_number="254712345678",
+        ),
+        "encrypted-phone-key",
+        provider="daraja",
+    )
+
+    async with database.sessions() as session:
+        stored = await session.get(PaymentRow, payment.id)
+        assert stored is not None
+        assert stored.phone_number is not None
+        assert stored.phone_number.startswith("enc:v1:")
+        assert "254712345678" not in stored.phone_number
+
+    decrypted = await repository.get(payment.id)
+    assert decrypted is not None
+    assert decrypted.phone_number == "254712345678"
+    await database.close()
+    get_settings.cache_clear()
+
+
+def test_production_repository_requires_pii_encryption_key(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FRINGEPAY_ENVIRONMENT", "production")
+    monkeypatch.delenv("FRINGEPAY_PII_ENCRYPTION_KEY", raising=False)
+    get_settings.cache_clear()
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'production-pii.db'}")
+    try:
+        with pytest.raises(ValueError, match="required in production"):
+            PaymentRepository(database)
+    finally:
+        get_settings.cache_clear()

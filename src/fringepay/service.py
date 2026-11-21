@@ -14,6 +14,7 @@ class IdempotencyConflict(Exception):
 class CreatePayment:
     amount: Money
     reference: str
+    phone_number: str | None = None
 
 
 class PaymentService:
@@ -40,6 +41,7 @@ class PaymentService:
             payment_id=payment_id,
             amount=request.amount,
             reference=request.reference,
+            phone_number=request.phone_number,
         )
         result = await self.provider.initiate(command)
         payment = Payment(
@@ -49,6 +51,7 @@ class PaymentService:
             provider=result.provider,
             provider_reference=result.provider_reference,
             status=result.status,
+            phone_number=request.phone_number,
         )
         self._payments[payment.id] = payment
         self._idempotency[idempotency_key] = (request, payment.id)

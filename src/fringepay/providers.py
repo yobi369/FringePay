@@ -11,6 +11,7 @@ class PaymentCommand:
     payment_id: str
     amount: Money
     reference: str
+    phone_number: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +19,18 @@ class ProviderResult:
     provider: str
     provider_reference: str | None
     status: PaymentStatus
+
+
+class ProviderTemporaryError(RuntimeError):
+    """A provider call failed before a payment request could be submitted."""
+
+
+class ProviderOutcomeUnknown(RuntimeError):
+    """A provider may have accepted a request, but its response was not received."""
+
+
+class ProviderRejected(ValueError):
+    """A provider definitively rejected a payment initiation request."""
 
 
 class PaymentProvider(Protocol):

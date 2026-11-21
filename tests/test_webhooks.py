@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -7,7 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fringepay.config import get_settings
+from fringepay.domain import Money, PaymentStatus
 from fringepay.main import app
+from fringepay.persistence import Database, PaymentRepository
+from fringepay.service import CreatePayment
 from fringepay.webhooks import (
     InvalidWebhookSignature,
     StaleWebhookSignature,
@@ -115,3 +119,82 @@ def test_signed_webhook_rejects_invalid_signature(
         },
     )
     assert response.status_code == 401
+
+
+def test_daraja_callback_is_verified_by_status_query_not_callback_result(
+    tmp_path, monkeypatch
+) -> None:
+    database_path = tmp_path / "daraja-callback.db"
+    database_url = f"sqlite+aiosqlite:///{database_path}"
+    monkeypatch.setenv("FRINGEPAY_DATABASE_URL", database_url)
+    monkeypatch.setenv("FRINGEPAY_DEFAULT_PROVIDER", "daraja")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_CONSUMER_KEY", "sandbox-key")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_CONSUMER_SECRET", "sandbox-secret")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_CALLBACK_SECRET", "daraja-test-callback-secret-123456")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_SHORTCODE", "174379")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_PASSKEY", "sandbox-passkey")
+    monkeypatch.setenv(
+        "FRINGEPAY_DARAJA_CALLBACK_URL",
+        "https://payments.example.test/v1/webhooks/daraja?token=daraja-test-callback-secret-123456",
+    )
+    get_settings.cache_clear()
+
+    async def seed_payment() -> str:
+        database = Database(database_url)
+        await database.create_schema()
+        repository = PaymentRepository(database)
+        payment, _ = await repository.reserve(
+            CreatePayment(Money(1200, "KES"), "daraja-callback-order"),
+            "daraja-callback-key",
+            provider="daraja",
+        )
+        await repository.apply_provider_result(
+            payment.id, PaymentStatus.PENDING, "checkout-daraja-001"
+        )
+        await database.close()
+        return payment.id
+
+    payment_id = asyncio.run(seed_payment())
+
+    class FakeDarajaProvider:
+        def __init__(self, settings):
+            self.settings = settings
+
+        async def query_stk_status(self, checkout_request_id: str):
+            assert checkout_request_id == "checkout-daraja-001"
+            return PaymentStatus.SUCCEEDED
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr("fringepay.api.DarajaProvider", FakeDarajaProvider)
+    try:
+        callback = {
+            "Body": {
+                "stkCallback": {
+                    "CheckoutRequestID": "checkout-daraja-001",
+                    "ResultCode": 1032,
+                    "ResultDesc": "Customer cancelled",
+                }
+            }
+        }
+        callback_url = "/v1/webhooks/daraja?token=daraja-test-callback-secret-123456"
+        with TestClient(app) as test_client:
+            first = test_client.post(callback_url, json=callback)
+            replay = test_client.post(callback_url, json=callback)
+            unauthenticated = test_client.post("/v1/webhooks/daraja", json=callback)
+            fetched = test_client.get(
+                f"/v1/payments/{payment_id}",
+                headers={"X-API-Key": "local-development-key"},
+            )
+
+        assert first.status_code == 200
+        assert first.json()["status"] == "succeeded"
+        assert first.json()["duplicate"] is False
+        assert replay.status_code == 200
+        assert replay.json()["duplicate"] is True
+        assert unauthenticated.status_code == 401
+        assert fetched.status_code == 200
+        assert fetched.json()["status"] == "succeeded"
+    finally:
+        get_settings.cache_clear()

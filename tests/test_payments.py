@@ -138,3 +138,49 @@ def test_payment_api_rejects_missing_api_key(api_client: TestClient) -> None:
         json={"amount_minor": 100, "currency": "KES", "reference": "unauthenticated"},
     )
     assert response.status_code == 401
+
+
+def test_daraja_payment_requires_a_valid_kenyan_phone_number(tmp_path, monkeypatch) -> None:
+    database_path = tmp_path / "daraja-api.db"
+    monkeypatch.setenv("FRINGEPAY_DATABASE_URL", f"sqlite+aiosqlite:///{database_path}")
+    monkeypatch.setenv("FRINGEPAY_DEFAULT_PROVIDER", "daraja")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_CONSUMER_KEY", "sandbox-key")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_CONSUMER_SECRET", "sandbox-secret")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_CALLBACK_SECRET", "daraja-test-callback-secret-123456")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_SHORTCODE", "174379")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_PASSKEY", "sandbox-passkey")
+    monkeypatch.setenv(
+        "FRINGEPAY_DARAJA_CALLBACK_URL",
+        "https://payments.example.test/v1/webhooks/daraja?token=daraja-test-callback-secret-123456",
+    )
+    get_settings.cache_clear()
+    try:
+        with TestClient(app) as test_client:
+            headers = {
+                "X-API-Key": "local-development-key",
+                "Idempotency-Key": "daraja-phone-key",
+            }
+            payload = {
+                "amount_minor": 2500,
+                "currency": "KES",
+                "reference": "daraja-api-order",
+            }
+            missing = test_client.post("/v1/payments", headers=headers, json=payload)
+            invalid = test_client.post(
+                "/v1/payments",
+                headers={**headers, "Idempotency-Key": "daraja-invalid-phone"},
+                json={**payload, "phone_number": "0712345678"},
+            )
+            valid = test_client.post(
+                "/v1/payments",
+                headers={**headers, "Idempotency-Key": "daraja-valid-phone"},
+                json={**payload, "phone_number": "254712345678"},
+            )
+
+        assert missing.status_code == 422
+        assert invalid.status_code == 422
+        assert valid.status_code == 202
+        assert valid.json()["provider"] == "daraja"
+        assert valid.json()["status"] == "pending"
+    finally:
+        get_settings.cache_clear()

@@ -13,19 +13,21 @@ from fringepay.persistence import (
     Database,
     PaymentRepository,
 )
+from fringepay.provider_factory import validate_provider_settings
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     settings = get_settings()
+    validate_provider_settings(settings)
     database = Database(settings.database_url)
-    if settings.environment != "production":
-        await database.create_schema()
-    else:
-        await database.verify_schema_revision(LATEST_SCHEMA_REVISION)
-    application.state.database = database
-    application.state.repository = PaymentRepository(database)
     try:
+        if settings.environment != "production":
+            await database.create_schema()
+        else:
+            await database.verify_schema_revision(LATEST_SCHEMA_REVISION)
+        application.state.database = database
+        application.state.repository = PaymentRepository(database)
         yield
     finally:
         await database.close()

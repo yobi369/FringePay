@@ -32,8 +32,10 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from fringepay.config import get_settings
 from fringepay.domain import Money, Payment, PaymentStatus
 from fringepay.ledger import EntrySide, Journal
+from fringepay.pii import PhoneNumberCipher
 from fringepay.reconciliation import (
     SettlementConflict,
     SettlementLine,
@@ -41,7 +43,7 @@ from fringepay.reconciliation import (
 )
 from fringepay.service import CreatePayment
 
-LATEST_SCHEMA_REVISION = "0006_settlement_reconciliation"
+LATEST_SCHEMA_REVISION = "0007_payment_phone_number"
 
 
 class Base(DeclarativeBase):
@@ -92,6 +94,7 @@ class PaymentRow(Base):
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     reference: Mapped[str] = mapped_column(String(128), nullable=False)
+    phone_number: Mapped[str | None] = mapped_column(String(512))
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     provider_reference: Mapped[str | None] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -330,6 +333,11 @@ class PaymentRepository:
 
     def __init__(self, database: Database) -> None:
         self.database = database
+        settings = get_settings()
+        self.phone_cipher = PhoneNumberCipher(
+            settings.pii_encryption_key,
+            required=settings.environment == "production",
+        )
 
     @staticmethod
     def _request_hash(request: CreatePayment) -> str:
@@ -337,12 +345,12 @@ class PaymentRepository:
             "amount_minor": request.amount.minor_units,
             "currency": request.amount.currency,
             "reference": request.reference,
+            "phone_number": request.phone_number,
         }
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-    @staticmethod
-    def _to_domain(row: PaymentRow) -> Payment:
+    def _to_domain(self, row: PaymentRow) -> Payment:
         return Payment(
             id=row.id,
             amount=Money(row.amount_minor, row.currency),
@@ -350,6 +358,7 @@ class PaymentRepository:
             provider=row.provider,
             provider_reference=row.provider_reference,
             status=PaymentStatus(row.status),
+            phone_number=self.phone_cipher.decrypt(row.phone_number),
         )
 
     async def reserve(
@@ -394,6 +403,7 @@ class PaymentRepository:
                         amount_minor=request.amount.minor_units,
                         currency=request.amount.currency,
                         reference=request.reference,
+                        phone_number=self.phone_cipher.encrypt(request.phone_number),
                         provider=provider,
                         provider_reference=None,
                         status=PaymentStatus.PENDING.value,
@@ -560,26 +570,43 @@ class PaymentRepository:
                 return claimed.id, self._to_domain(payment_row)
 
     async def recover_stale_dispatches(self, stale_after_seconds: int = 60) -> int:
-        """Make abandoned processing leases eligible for safe idempotent retry."""
+        """Recover leases without blindly repeating a possibly accepted live charge."""
         now = datetime.now(UTC)
         cutoff = now - timedelta(seconds=stale_after_seconds)
+        recovered = 0
         async with self.database.sessions() as session:
             async with session.begin():
-                result = await session.execute(
-                    update(ProviderDispatchOutboxRow)
-                    .where(
-                        ProviderDispatchOutboxRow.status == "processing",
-                        ProviderDispatchOutboxRow.locked_at < cutoff,
+                events = (
+                    await session.scalars(
+                        select(ProviderDispatchOutboxRow)
+                        .where(
+                            ProviderDispatchOutboxRow.status == "processing",
+                            ProviderDispatchOutboxRow.locked_at < cutoff,
+                        )
+                        .with_for_update(skip_locked=True)
                     )
-                    .values(
-                        status="retry",
-                        available_at=now,
-                        locked_at=None,
-                        last_error_code="dispatch_lease_expired",
-                        updated_at=now,
-                    )
-                )
-                return result.rowcount or 0
+                ).all()
+                for event in events:
+                    payment = await session.get(PaymentRow, event.payment_id)
+                    if payment is None:
+                        raise RuntimeError("outbox event has no payment")
+                    event.locked_at = None
+                    event.updated_at = now
+                    if payment.provider == "sandbox":
+                        event.status = "retry"
+                        event.available_at = now
+                        event.last_error_code = "dispatch_lease_expired"
+                    else:
+                        # A worker may have crashed after the provider accepted the
+                        # request but before the acknowledgement was persisted.
+                        # Quarantine this payment for status query/manual resolution.
+                        event.status = "unknown"
+                        event.last_error_code = "dispatch_lease_expired_unknown"
+                        if payment.status == PaymentStatus.PENDING.value:
+                            payment.status = PaymentStatus.PROCESSING.value
+                            payment.updated_at = now
+                    recovered += 1
+        return recovered
 
     async def retry_dispatch(
         self,
@@ -605,6 +632,24 @@ class PaymentRepository:
                 event.locked_at = None
                 event.last_error_code = error_code[:64]
                 event.updated_at = now
+
+    async def mark_dispatch_unknown(self, outbox_id: str, error_code: str) -> None:
+        """Stop automatic retries when a provider may already have accepted a charge."""
+        async with self.database.sessions() as session:
+            async with session.begin():
+                event = await session.get(ProviderDispatchOutboxRow, outbox_id)
+                if event is None or event.status != "processing":
+                    raise ValueError("dispatch event is not claimed")
+                payment = await session.get(PaymentRow, event.payment_id)
+                if payment is None:
+                    raise RuntimeError("outbox event has no payment")
+                if payment.status == PaymentStatus.PENDING.value:
+                    payment.status = PaymentStatus.PROCESSING.value
+                    payment.updated_at = datetime.now(UTC)
+                event.status = "unknown"
+                event.locked_at = None
+                event.last_error_code = error_code[:64]
+                event.updated_at = datetime.now(UTC)
 
     async def outbox_status(self, outbox_id: str) -> tuple[str, int, str | None] | None:
         async with self.database.sessions() as session:
@@ -925,6 +970,48 @@ class PaymentRepository:
                 return int(debit_total) - int(credit_total)
             return int(credit_total) - int(debit_total)
 
+    async def list_pending_provider_payments(
+        self, provider: str, limit: int = 100
+    ) -> list[Payment]:
+        """List non-final payments with provider references for status reconciliation."""
+        if limit < 1 or limit > 500:
+            raise ValueError("reconciliation limit must be between 1 and 500")
+        async with self.database.sessions() as session:
+            rows = (
+                await session.scalars(
+                    select(PaymentRow)
+                    .where(
+                        PaymentRow.provider == provider,
+                        PaymentRow.provider_reference.is_not(None),
+                        PaymentRow.status.in_(
+                            (PaymentStatus.PENDING.value, PaymentStatus.PROCESSING.value)
+                        ),
+                    )
+                    .order_by(PaymentRow.updated_at)
+                    .limit(limit)
+                )
+            ).all()
+            return [self._to_domain(row) for row in rows]
+
+    async def get_by_provider_reference(
+        self, provider: str, provider_reference: str
+    ) -> Payment | None:
+        """Resolve a provider callback to one payment without crossing provider boundaries."""
+        async with self.database.sessions() as session:
+            rows = (
+                await session.scalars(
+                    select(PaymentRow)
+                    .where(
+                        PaymentRow.provider == provider,
+                        PaymentRow.provider_reference == provider_reference,
+                    )
+                    .limit(2)
+                )
+            ).all()
+            if len(rows) > 1:
+                raise RuntimeError("provider reference is ambiguous across tenants")
+            return self._to_domain(rows[0]) if rows else None
+
     async def get(
         self, payment_id: str, tenant_id: str = "local"
     ) -> Payment | None:
@@ -979,7 +1066,7 @@ class PaymentRepository:
         if not name.strip() or len(name) > 128:
             raise ValueError("tenant name must contain 1 to 128 characters")
         tenant_id = str(uuid4())
-        api_key = "fp_live_" + secrets.token_urlsafe(32)
+        api_key = "fp_test_" + secrets.token_urlsafe(32)
         key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
         async with self.database.sessions() as session:
             async with session.begin():

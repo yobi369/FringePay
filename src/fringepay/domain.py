@@ -72,6 +72,7 @@ class Payment:
     provider: str
     provider_reference: str | None
     status: PaymentStatus
+    phone_number: str | None = None
 
     def __post_init__(self) -> None:
         if self.amount.minor_units <= 0:
