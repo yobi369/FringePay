@@ -146,12 +146,12 @@ def test_daraja_payment_requires_a_valid_kenyan_phone_number(tmp_path, monkeypat
     monkeypatch.setenv("FRINGEPAY_DEFAULT_PROVIDER", "daraja")
     monkeypatch.setenv("FRINGEPAY_DARAJA_CONSUMER_KEY", "sandbox-key")
     monkeypatch.setenv("FRINGEPAY_DARAJA_CONSUMER_SECRET", "sandbox-secret")
-    monkeypatch.setenv("FRINGEPAY_DARAJA_CALLBACK_SECRET", "daraja-test-callback-secret")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_CALLBACK_SECRET", "daraja-test-callback-secret-123456")
     monkeypatch.setenv("FRINGEPAY_DARAJA_SHORTCODE", "174379")
     monkeypatch.setenv("FRINGEPAY_DARAJA_PASSKEY", "sandbox-passkey")
     monkeypatch.setenv(
         "FRINGEPAY_DARAJA_CALLBACK_URL",
-        "https://payments.example.test/v1/webhooks/daraja?token=daraja-test-callback-secret",
+        "https://payments.example.test/v1/webhooks/daraja?token=daraja-test-callback-secret-123456",
     )
     get_settings.cache_clear()
     try:
