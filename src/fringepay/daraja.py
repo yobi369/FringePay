@@ -99,6 +99,39 @@ class DarajaProvider:
         self._token_expires_at = time.monotonic() + max(30, expires_in - 60)
         return token
 
+    async def query_stk_status(self, checkout_request_id: str) -> PaymentStatus | None:
+        """Query Safaricom for final status; callback payloads alone are not trusted."""
+        token = await self._get_access_token()
+        timestamp = datetime.now(ZoneInfo("Africa/Nairobi")).strftime("%Y%m%d%H%M%S")
+        shortcode = self.settings.daraja_shortcode
+        password_source = f"{shortcode}{self.settings.daraja_passkey}{timestamp}"
+        password = base64.b64encode(password_source.encode("utf-8")).decode("ascii")
+        payload = {
+            "BusinessShortCode": shortcode,
+            "Password": password,
+            "Timestamp": timestamp,
+            "CheckoutRequestID": checkout_request_id,
+        }
+        try:
+            response = await self._client.post(
+                "/mpesa/stkpushquery/v1/query",
+                json=payload,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            response.raise_for_status()
+            result = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ProviderTemporaryError("Daraja transaction status query is unavailable") from exc
+
+        result_code = result.get("ResultCode")
+        if result_code is None:
+            return None
+        if str(result_code) == "0":
+            return PaymentStatus.SUCCEEDED
+        if str(result_code) == "1032":
+            return PaymentStatus.CANCELLED
+        return PaymentStatus.FAILED
+
     async def initiate(self, command: PaymentCommand) -> ProviderResult:
         if command.amount.currency != "KES":
             raise ProviderRejected("Daraja STK Push currently supports KES only")
