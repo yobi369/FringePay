@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import time
 
 from fringepay.config import get_settings
 from fringepay.domain import PaymentStatus
-from fringepay.persistence import Database, PaymentRepository
+from fringepay.persistence import (
+    Database,
+    PaymentRepository,
+    WebhookReplayConflict,
+)
 from fringepay.provider_factory import build_provider
 from fringepay.providers import (
     PaymentCommand,
@@ -63,6 +69,49 @@ async def dispatch_one(
     return True
 
 
+async def reconcile_daraja_statuses(
+    repository: PaymentRepository,
+    provider: PaymentProvider,
+    limit: int = 100,
+) -> int:
+    """Poll unresolved Daraja checkouts so callbacks are not the only completion path."""
+    query_status = getattr(provider, "query_stk_status", None)
+    if query_status is None:
+        return 0
+    payments = await repository.list_pending_provider_payments("daraja", limit=limit)
+    reconciled = 0
+    for payment in payments:
+        if payment.provider_reference is None:
+            continue
+        try:
+            verified_status = await query_status(payment.provider_reference)
+        except ProviderTemporaryError:
+            logger.warning("Daraja status query unavailable; payment remains pending")
+            continue
+        if verified_status is None:
+            continue
+        fingerprint = (
+            f"{payment.provider_reference}:{verified_status.value}".encode("utf-8")
+        )
+        payload_hash = hashlib.sha256(fingerprint).hexdigest()
+        try:
+            await repository.apply_provider_webhook(
+                "daraja",
+                payment.provider_reference,
+                payload_hash,
+                payment.id,
+                verified_status,
+            )
+        except WebhookReplayConflict:
+            logger.error("Conflicting verified Daraja status event; manual review required")
+            continue
+        except ValueError:
+            logger.warning("Daraja status transition rejected; manual review required")
+            continue
+        reconciled += 1
+    return reconciled
+
+
 async def run_worker(poll_interval_seconds: float = 1.0) -> None:
     settings = get_settings()
     database = Database(settings.database_url)
@@ -70,9 +119,14 @@ async def run_worker(poll_interval_seconds: float = 1.0) -> None:
         await database.create_schema()
     repository = PaymentRepository(database)
     provider = build_provider(settings)
+    last_reconcile = 0.0
     try:
         while True:
             did_work = await dispatch_one(repository, provider)
+            now = time.monotonic()
+            if provider.name == "daraja" and now - last_reconcile >= 30:
+                await reconcile_daraja_statuses(repository, provider)
+                last_reconcile = now
             if not did_work:
                 await asyncio.sleep(poll_interval_seconds)
     finally:
