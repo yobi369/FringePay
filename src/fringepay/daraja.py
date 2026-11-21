@@ -85,7 +85,9 @@ class DarajaProvider:
             )
             response.raise_for_status()
             payload = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
+            if not isinstance(payload, dict):
+                raise ValueError("invalid authentication response")
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
             raise ProviderTemporaryError("Daraja authentication is temporarily unavailable") from exc
 
         token = payload.get("access_token")
@@ -120,7 +122,9 @@ class DarajaProvider:
             )
             response.raise_for_status()
             result = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
+            if not isinstance(result, dict):
+                raise ValueError("invalid status query response")
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
             raise ProviderTemporaryError("Daraja transaction status query is unavailable") from exc
 
         result_code = result.get("ResultCode")
@@ -181,7 +185,9 @@ class DarajaProvider:
 
         try:
             result = response.json()
-        except ValueError as exc:
+            if not isinstance(result, dict):
+                raise ValueError("invalid STK Push response")
+        except (ValueError, TypeError, AttributeError) as exc:
             raise ProviderOutcomeUnknown("Daraja returned an unreadable STK Push response") from exc
 
         if str(result.get("ResponseCode")) != "0":
