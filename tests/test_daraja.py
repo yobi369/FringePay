@@ -135,3 +135,55 @@ def test_daraja_live_environment_is_disabled() -> None:
 def test_daraja_requires_https_callback_url() -> None:
     with pytest.raises(ValueError, match="HTTPS"):
         DarajaProvider(make_settings(daraja_callback_url="http://localhost/callback"))
+
+
+@pytest.mark.asyncio
+async def test_daraja_status_query_maps_final_result_codes() -> None:
+    responses = [
+        {"access_token": "test-token", "expires_in": "3599"},
+        {
+            "ResponseCode": "0",
+            "CheckoutRequestID": "checkout-verified-001",
+            "ResultCode": "0",
+            "ResultDesc": "The service request is processed successfully",
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v1/generate":
+            return httpx.Response(200, json=responses[0])
+        assert request.url.path == "/mpesa/stkpushquery/v1/query"
+        assert request.headers["Authorization"] == "Bearer test-token"
+        payload = json.loads(request.content)
+        assert payload["CheckoutRequestID"] == "checkout-verified-001"
+        return httpx.Response(200, json=responses[1])
+
+    async with httpx.AsyncClient(
+        base_url=BASE_URL, transport=httpx.MockTransport(handler)
+    ) as client:
+        provider = DarajaProvider(make_settings(), http_client=client)
+        status = await provider.query_stk_status("checkout-verified-001")
+
+    assert status is PaymentStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_daraja_status_query_keeps_unresolved_result_pending() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v1/generate":
+            return httpx.Response(200, json={"access_token": "test-token", "expires_in": "3599"})
+        return httpx.Response(
+            200,
+            json={
+                "ResponseCode": "0",
+                "ResponseDescription": "The service request has been accepted successfully",
+            },
+        )
+
+    async with httpx.AsyncClient(
+        base_url=BASE_URL, transport=httpx.MockTransport(handler)
+    ) as client:
+        provider = DarajaProvider(make_settings(), http_client=client)
+        status = await provider.query_stk_status("checkout-still-pending")
+
+    assert status is None
