@@ -1,5 +1,8 @@
 """Provider construction and configuration validation."""
 
+import hmac
+from urllib.parse import parse_qs, urlsplit
+
 from fringepay.config import Settings
 from fringepay.providers import PaymentProvider, SandboxProvider
 
@@ -25,6 +28,11 @@ def validate_provider_settings(settings: Settings) -> None:
         raise ValueError(f"missing Daraja configuration: {', '.join(missing)}")
     if not settings.daraja_callback_url.startswith("https://"):
         raise ValueError("Daraja callback URL must use HTTPS")
+    callback_tokens = parse_qs(urlsplit(settings.daraja_callback_url).query).get("token", [])
+    if len(callback_tokens) != 1 or not hmac.compare_digest(
+        callback_tokens[0], settings.daraja_callback_secret
+    ):
+        raise ValueError("Daraja callback URL token must match the configured callback secret")
 
 
 def build_provider(settings: Settings) -> PaymentProvider:
