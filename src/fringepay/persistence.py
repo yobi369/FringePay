@@ -964,6 +964,29 @@ class PaymentRepository:
                 return int(debit_total) - int(credit_total)
             return int(credit_total) - int(debit_total)
 
+    async def list_pending_provider_payments(
+        self, provider: str, limit: int = 100
+    ) -> list[Payment]:
+        """List non-final payments with provider references for status reconciliation."""
+        if limit < 1 or limit > 500:
+            raise ValueError("reconciliation limit must be between 1 and 500")
+        async with self.database.sessions() as session:
+            rows = (
+                await session.scalars(
+                    select(PaymentRow)
+                    .where(
+                        PaymentRow.provider == provider,
+                        PaymentRow.provider_reference.is_not(None),
+                        PaymentRow.status.in_(
+                            (PaymentStatus.PENDING.value, PaymentStatus.PROCESSING.value)
+                        ),
+                    )
+                    .order_by(PaymentRow.updated_at)
+                    .limit(limit)
+                )
+            ).all()
+            return [self._to_domain(row) for row in rows]
+
     async def get_by_provider_reference(
         self, provider: str, provider_reference: str
     ) -> Payment | None:
