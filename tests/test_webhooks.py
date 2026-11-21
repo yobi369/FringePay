@@ -182,7 +182,9 @@ def test_daraja_callback_is_verified_by_status_query_not_callback_result(
             first = test_client.post(
                 "/v1/webhooks/daraja?token=daraja-test-callback-secret", json=callback
             )
-            replay = test_client.post("/v1/webhooks/daraja", json=callback)
+            replay = test_client.post(
+                "/v1/webhooks/daraja?token=daraja-test-callback-secret", json=callback
+            )
             fetched = test_client.get(
                 f"/v1/payments/{payment_id}",
                 headers={"X-API-Key": "local-development-key"},
