@@ -19,7 +19,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["uvicorn", "fringepay.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "fringepay.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
     environment: &fringepay_environment
       FRINGEPAY_ENVIRONMENT: ${FRINGEPAY_ENVIRONMENT:-development}
       FRINGEPAY_API_PREFIX: /v1
