@@ -18,6 +18,7 @@ def validate_provider_settings(settings: Settings) -> None:
         "business shortcode": settings.daraja_shortcode,
         "Lipa Na M-Pesa passkey": settings.daraja_passkey,
         "callback URL": settings.daraja_callback_url,
+        "callback secret": settings.daraja_callback_secret,
     }
     missing = [name for name, value in required.items() if not value]
     if missing:
