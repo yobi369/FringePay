@@ -1,17 +1,20 @@
 """HTTP routes for asynchronous sandbox payment operations."""
 
 import hashlib
+import json
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field, ValidationError
 
 from fringepay.config import get_settings
+from fringepay.daraja import DarajaProvider
 from fringepay.domain import InvalidPaymentTransition, Money, PaymentStatus
 from fringepay.persistence import (
     PaymentRepository,
     PersistentIdempotencyConflict,
     WebhookReplayConflict,
 )
+from fringepay.providers import ProviderTemporaryError
 from fringepay.service import CreatePayment
 from fringepay.webhooks import InvalidWebhookSignature, verify_hmac_webhook
 
@@ -115,6 +118,63 @@ webhook_router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 class ProviderWebhookBody(BaseModel):
     payment_id: str = Field(min_length=1, max_length=36)
     status: PaymentStatus
+
+
+@webhook_router.post("/daraja")
+async def receive_daraja_webhook(request: Request) -> dict[str, str | bool]:
+    """Use the callback only as a signal; verify final status with Daraja's query API."""
+    settings = get_settings()
+    if settings.default_provider != "daraja":
+        raise HTTPException(status_code=503, detail="Daraja provider is not enabled")
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body)
+        callback = payload["Body"]["stkCallback"]
+        checkout_request_id = callback["CheckoutRequestID"]
+        if not isinstance(checkout_request_id, str) or not checkout_request_id:
+            raise ValueError("missing checkout request ID")
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="invalid Daraja callback payload") from exc
+
+    repository: PaymentRepository = request.app.state.repository
+    payment = await repository.get_by_provider_reference("daraja", checkout_request_id)
+    if payment is None:
+        # Acknowledge unknown callbacks without exposing whether a payment exists.
+        return {"accepted": True, "matched": False, "status": "unmatched"}
+
+    provider = DarajaProvider(settings)
+    try:
+        verified_status = await provider.query_stk_status(checkout_request_id)
+    except ProviderTemporaryError:
+        return {"accepted": True, "matched": True, "status": "verification_pending"}
+    finally:
+        await provider.aclose()
+
+    if verified_status is None:
+        return {"accepted": True, "matched": True, "status": "verification_pending"}
+
+    verified_payload = f"{checkout_request_id}:{verified_status.value}".encode("utf-8")
+    payload_hash = hashlib.sha256(verified_payload).hexdigest()
+    try:
+        updated, created = await repository.apply_provider_webhook(
+            "daraja",
+            checkout_request_id,
+            payload_hash,
+            payment.id,
+            verified_status,
+        )
+    except WebhookReplayConflict as exc:
+        raise HTTPException(status_code=409, detail="conflicting Daraja callback") from exc
+    except (InvalidPaymentTransition, ValueError) as exc:
+        raise HTTPException(status_code=409, detail="invalid Daraja payment transition") from exc
+
+    return {
+        "accepted": True,
+        "matched": True,
+        "duplicate": not created,
+        "payment_id": updated.id,
+        "status": updated.status.value,
+    }
 
 
 @webhook_router.post("/{provider}")
