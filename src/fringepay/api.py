@@ -145,7 +145,10 @@ async def receive_daraja_webhook(request: Request) -> dict[str, str | bool]:
     try:
         provider = DarajaProvider(settings)
     except ValueError as exc:
-        raise HTTPException(status_code=503, detail="Daraja callback verification is not configured") from exc
+        raise HTTPException(
+            status_code=503,
+            detail="Daraja callback verification is not configured",
+        ) from exc
     try:
         verified_status = await provider.query_stk_status(checkout_request_id)
     except ProviderTemporaryError:
@@ -156,7 +159,7 @@ async def receive_daraja_webhook(request: Request) -> dict[str, str | bool]:
     if verified_status is None:
         return {"accepted": True, "matched": True, "status": "verification_pending"}
 
-    verified_payload = f"{checkout_request_id}:{verified_status.value}".encode("utf-8")
+    verified_payload = f"{checkout_request_id}:{verified_status.value}".encode()
     payload_hash = hashlib.sha256(verified_payload).hexdigest()
     try:
         updated, created = await repository.apply_provider_webhook(
