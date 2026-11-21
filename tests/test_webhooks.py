@@ -130,11 +130,12 @@ def test_daraja_callback_is_verified_by_status_query_not_callback_result(
     monkeypatch.setenv("FRINGEPAY_DEFAULT_PROVIDER", "daraja")
     monkeypatch.setenv("FRINGEPAY_DARAJA_CONSUMER_KEY", "sandbox-key")
     monkeypatch.setenv("FRINGEPAY_DARAJA_CONSUMER_SECRET", "sandbox-secret")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_CALLBACK_SECRET", "daraja-test-callback-secret")
     monkeypatch.setenv("FRINGEPAY_DARAJA_SHORTCODE", "174379")
     monkeypatch.setenv("FRINGEPAY_DARAJA_PASSKEY", "sandbox-passkey")
     monkeypatch.setenv(
         "FRINGEPAY_DARAJA_CALLBACK_URL",
-        "https://payments.example.test/v1/webhooks/daraja",
+        "https://payments.example.test/v1/webhooks/daraja?token=daraja-test-callback-secret",
     )
     get_settings.cache_clear()
 
@@ -178,7 +179,9 @@ def test_daraja_callback_is_verified_by_status_query_not_callback_result(
             }
         }
         with TestClient(app) as test_client:
-            first = test_client.post("/v1/webhooks/daraja", json=callback)
+            first = test_client.post(
+                "/v1/webhooks/daraja?token=daraja-test-callback-secret", json=callback
+            )
             replay = test_client.post("/v1/webhooks/daraja", json=callback)
             fetched = test_client.get(
                 f"/v1/payments/{payment_id}",
