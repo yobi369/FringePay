@@ -25,7 +25,7 @@ Official portal: https://developer.safaricom.co.ke/
     FRINGEPAY_DARAJA_TRANSACTION_TYPE=CustomerPayBillOnline
     FRINGEPAY_PII_ENCRYPTION_KEY=<generated-fernet-key>
 
-The shortcode shown is the common Daraja sandbox test shortcode; use the value assigned to your own sandbox app if different. Generate the PII encryption key with the cryptography Fernet helper shown in the root .env.example file and store it in a secret manager.
+The shortcode shown is the common Daraja sandbox test shortcode; use the value assigned to your own sandbox app if different. Generate a callback secret with `python -c "import secrets; print(secrets.token_urlsafe(32))"` and place the same value in the callback URL query and callback-secret setting. Generate the PII encryption key with the cryptography Fernet helper shown in the root .env.example file and store both secrets in a secret manager.
 
 ## Create an STK Push payment
 
