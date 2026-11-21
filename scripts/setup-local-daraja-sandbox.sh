@@ -11,7 +11,7 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 command -v docker >/dev/null 2>&1 || fail "Docker is not installed. Install Docker Engine and the Compose plugin, then rerun this script."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is unavailable. Install/enable the Docker Compose plugin."
-command -v python3 >/dev/null 2>&1 || fail "python3 is required to generate local secrets."
+command -v python3 >/dev/null 2>&1 || fail "python3 is required to generate local secrets."\ncommand -v curl >/dev/null 2>&1 || fail "curl is required for local health checks."
 
 if [[ -e .env ]]; then
   fail ".env already exists. Back it up and remove it only if you intentionally want to replace the local configuration."
