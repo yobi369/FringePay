@@ -17,6 +17,7 @@ Start in Kenya with M-Pesa through an approved Daraja integration, then expand t
 - SQLAlchemy 2 async persistence and Alembic migrations.
 - PostgreSQL support and SQLite local development support.
 - Tenant-scoped API credentials stored as SHA-256 hashes, revocation, and tenant-isolated payment reads.
+- Optional Fernet encryption for stored customer phone numbers; production requires a PII encryption key.
 - Durable tenant-scoped idempotency with payload-conflict detection.
 - Transactional provider-dispatch outbox with atomic claims, bounded exponential retries, dead-letter handling, and expired-lease recovery.
 - Separate worker command for dispatching outbox events (sandbox adapter only).
@@ -97,7 +98,7 @@ In a second terminal, run fringepay-worker to drain pending sandbox outbox event
 - GET /health — process health only; it does not prove database/provider readiness.
 - GET /ready — checks connectivity to the configured database.
 - GET /v1/status — confirms sandbox-only mode.
-- POST /v1/payments — reserve a sandbox payment and queue dispatch; returns HTTP 202. Requires X-API-Key and Idempotency-Key headers plus JSON body with amount_minor, currency, and reference.
+- POST /v1/payments — reserve a payment and queue dispatch; returns HTTP 202. Requires X-API-Key and Idempotency-Key headers plus JSON body with amount_minor, currency, and reference. Daraja requests also require phone_number.
 - GET /v1/payments/{payment_id} — retrieve a persisted payment; requires X-API-Key.
 - POST /v1/webhooks/sandbox — accept a signed sandbox status callback; requires X-Provider-Event-Id and X-FringePay-Signature, not the client API key.
 
