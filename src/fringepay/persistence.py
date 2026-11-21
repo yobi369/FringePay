@@ -964,6 +964,25 @@ class PaymentRepository:
                 return int(debit_total) - int(credit_total)
             return int(credit_total) - int(debit_total)
 
+    async def get_by_provider_reference(
+        self, provider: str, provider_reference: str
+    ) -> Payment | None:
+        """Resolve a provider callback to one payment without crossing provider boundaries."""
+        async with self.database.sessions() as session:
+            rows = (
+                await session.scalars(
+                    select(PaymentRow)
+                    .where(
+                        PaymentRow.provider == provider,
+                        PaymentRow.provider_reference == provider_reference,
+                    )
+                    .limit(2)
+                )
+            ).all()
+            if len(rows) > 1:
+                raise RuntimeError("provider reference is ambiguous across tenants")
+            return self._to_domain(rows[0]) if rows else None
+
     async def get(
         self, payment_id: str, tenant_id: str = "local"
     ) -> Payment | None:
