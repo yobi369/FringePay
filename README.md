@@ -78,9 +78,9 @@ A provider timeout is an unknown outcome, not proof that a charge failed. Provid
     cp .env.example .env
     uvicorn fringepay.main:app --reload
 
-By default, development uses local SQLite at ./fringepay.db; the development app creates its schema automatically. For PostgreSQL, start the local service:
+By default, development uses local SQLite at ./fringepay.db; the development app creates its schema automatically. For the full local PostgreSQL + API + worker stack, use:
 
-    docker compose up -d postgres
+    docker compose up --build -d
 
 Then set FRINGEPAY_DATABASE_URL in .env to:
 
@@ -92,7 +92,7 @@ Apply versioned migrations before running a deployment that does not auto-create
 
 The local compose password is for development only. Replace it and use managed secrets for any shared environment. Local development seeds a tenant and the local-only key local-development-key. For a deployed environment, apply migrations and run fringepay-admin create-tenant --name "Merchant Name"; the random API key is displayed once and must be stored in a secret manager. Revoke a credential with fringepay-admin revoke-api-key --tenant-id TENANT_ID --key-prefix KEY_PREFIX.
 
-In a second terminal, run fringepay-worker to drain pending sandbox outbox events. The current worker is sandbox-only.
+Compose starts the API and worker as separate services. The worker uses the selected provider adapter: the deterministic sandbox by default, or Daraja sandbox when FRINGEPAY_DEFAULT_PROVIDER=daraja and its sandbox credentials are configured.
 
 ## API
 
@@ -114,7 +114,7 @@ The sandbox webhook secret is configured with FRINGEPAY_SANDBOX_WEBHOOK_SECRET. 
 
 ## Launch milestones
 
-See the Kenya MVP launch plan at docs/launch/kenya-mvp-plan.md for the release stages, acceptance criteria, and payment safety invariants. The Daraja sandbox setup and STK Push flow are documented in docs/integrations/daraja-sandbox.md.
+See docs/launch/kenya-mvp-plan.md for the release stages and payment safety invariants, docs/integrations/daraja-sandbox.md for the Daraja sandbox setup, and docs/deployment/docker-runbook.md for container deployment and operations.
 
 ## Safety and scope
 
