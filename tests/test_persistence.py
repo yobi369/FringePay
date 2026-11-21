@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from cryptography.fernet import Fernet
 import pytest
+from cryptography.fernet import Fernet
 
 from fringepay.config import get_settings
 from fringepay.domain import Money, PaymentStatus
