@@ -10,6 +10,7 @@ import time
 from fringepay.config import get_settings
 from fringepay.domain import PaymentStatus
 from fringepay.persistence import (
+    LATEST_SCHEMA_REVISION,
     Database,
     PaymentRepository,
     WebhookReplayConflict,
@@ -119,6 +120,8 @@ async def run_worker(poll_interval_seconds: float = 1.0) -> None:
     try:
         if settings.environment != "production":
             await database.create_schema()
+        else:
+            await database.verify_schema_revision(LATEST_SCHEMA_REVISION)
         repository = PaymentRepository(database)
         provider = build_provider(settings)
         last_reconcile = 0.0
