@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: fringepay
+      POSTGRES_USER: fringepay
+      POSTGRES_PASSWORD: localdev_only_change_me
+    ports:
+      - "5432:5432"
+    volumes:
+      - fringepay_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fringepay -d fringepay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  fringepay_postgres_data:
