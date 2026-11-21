@@ -41,7 +41,7 @@ from fringepay.reconciliation import (
 )
 from fringepay.service import CreatePayment
 
-LATEST_SCHEMA_REVISION = "0006_settlement_reconciliation"
+LATEST_SCHEMA_REVISION = "0007_payment_phone_number"
 
 
 class Base(DeclarativeBase):
@@ -92,6 +92,7 @@ class PaymentRow(Base):
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     reference: Mapped[str] = mapped_column(String(128), nullable=False)
+    phone_number: Mapped[str | None] = mapped_column(String(16))
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     provider_reference: Mapped[str | None] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -337,6 +338,7 @@ class PaymentRepository:
             "amount_minor": request.amount.minor_units,
             "currency": request.amount.currency,
             "reference": request.reference,
+            "phone_number": request.phone_number,
         }
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -350,6 +352,7 @@ class PaymentRepository:
             provider=row.provider,
             provider_reference=row.provider_reference,
             status=PaymentStatus(row.status),
+            phone_number=row.phone_number,
         )
 
     async def reserve(
@@ -394,6 +397,7 @@ class PaymentRepository:
                         amount_minor=request.amount.minor_units,
                         currency=request.amount.currency,
                         reference=request.reference,
+                        phone_number=request.phone_number,
                         provider=provider,
                         provider_reference=None,
                         status=PaymentStatus.PENDING.value,
