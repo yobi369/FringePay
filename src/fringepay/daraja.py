@@ -88,7 +88,9 @@ class DarajaProvider:
             if not isinstance(payload, dict):
                 raise ValueError("invalid authentication response")
         except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
-            raise ProviderTemporaryError("Daraja authentication is temporarily unavailable") from exc
+            raise ProviderTemporaryError(
+                "Daraja authentication is temporarily unavailable"
+            ) from exc
 
         token = payload.get("access_token")
         if not isinstance(token, str) or not token:
