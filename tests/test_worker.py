@@ -9,7 +9,12 @@ from fringepay.persistence import (
     PaymentRepository,
     ProviderDispatchOutboxRow,
 )
-from fringepay.providers import SandboxOutcome, SandboxProvider
+from fringepay.providers import (
+    PaymentCommand,
+    ProviderOutcomeUnknown,
+    SandboxOutcome,
+    SandboxProvider,
+)
 from fringepay.service import CreatePayment
 from fringepay.worker import dispatch_one
 
@@ -62,4 +67,34 @@ async def test_worker_recovers_expired_dispatch_lease(tmp_path: Path) -> None:
     assert handled is True
     assert updated is not None
     assert updated.status is PaymentStatus.SUCCEEDED
+    await database.close()
+
+
+class UnknownOutcomeProvider:
+    name = "daraja"
+
+    async def initiate(self, command: PaymentCommand):
+        raise ProviderOutcomeUnknown("simulated read timeout after submission")
+
+
+@pytest.mark.asyncio
+async def test_worker_quarantines_unknown_provider_outcome_without_retry(
+    tmp_path: Path,
+) -> None:
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'unknown.db'}")
+    await database.create_schema()
+    repository = PaymentRepository(database)
+    payment, _ = await repository.reserve(
+        CreatePayment(Money(1500, "KES"), "unknown-outcome-order"),
+        "unknown-outcome-key",
+        provider="daraja",
+    )
+
+    handled = await dispatch_one(repository, UnknownOutcomeProvider())
+    updated = await repository.get(payment.id)
+
+    assert handled is True
+    assert updated is not None
+    assert updated.status is PaymentStatus.PROCESSING
+    assert await dispatch_one(repository, SandboxProvider()) is False
     await database.close()
