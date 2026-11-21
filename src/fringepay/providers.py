@@ -11,6 +11,7 @@ class PaymentCommand:
     payment_id: str
     amount: Money
     reference: str
+    phone_number: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
