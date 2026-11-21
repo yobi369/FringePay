@@ -22,8 +22,9 @@ Official portal: https://developer.safaricom.co.ke/
     FRINGEPAY_DARAJA_PASSKEY=your-sandbox-lipa-na-m-pesa-passkey
     FRINGEPAY_DARAJA_CALLBACK_URL=https://your-public-host/v1/webhooks/daraja
     FRINGEPAY_DARAJA_TRANSACTION_TYPE=CustomerPayBillOnline
+    FRINGEPAY_PII_ENCRYPTION_KEY=<generated-fernet-key>
 
-The shortcode shown is the common Daraja sandbox test shortcode; use the value assigned to your own sandbox app if different.
+The shortcode shown is the common Daraja sandbox test shortcode; use the value assigned to your own sandbox app if different. Generate the PII encryption key with the cryptography Fernet helper shown in the root .env.example file and store it in a secret manager.
 
 ## Create an STK Push payment
 
@@ -69,7 +70,7 @@ If the provider request times out after submission, FringePay cannot know whethe
 - Sandbox only; live Daraja endpoints are intentionally disabled.
 - STK Push initiation and status-query verification are implemented; other Daraja products are not.
 - Merchant portal, refund/reversal operations, M-Pesa receipt storage, and automated settlement statement ingestion are not yet part of this integration.
-- Phone numbers are currently persisted to support durable worker dispatch. Before handling real customer data, add encryption at rest, access controls, retention/deletion policy, and production secret management.
+- Phone numbers are persisted for durable worker dispatch and encrypted at rest when FRINGEPAY_PII_ENCRYPTION_KEY is configured. Production startup requires this key. A retention/deletion policy, access controls, and managed key rotation are still required before handling real customer data.
 - Do not use real customer funds or advertise live payment capability until provider approval, security review, operational controls, and legal/regulatory assessment are complete.
 
 ## Regulatory readiness
