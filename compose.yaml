@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: fringepay
       POSTGRES_USER: fringepay
-      POSTGRES_PASSWORD: localdev_only_change_me
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localdev_only_change_me}
     ports:
       - "5432:5432"
     volumes:
@@ -14,6 +14,50 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uvicorn", "fringepay.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: &fringepay_environment
+      FRINGEPAY_ENVIRONMENT: ${FRINGEPAY_ENVIRONMENT:-development}
+      FRINGEPAY_API_PREFIX: /v1
+      FRINGEPAY_DATABASE_URL: postgresql+asyncpg://fringepay:${POSTGRES_PASSWORD:-localdev_only_change_me}@postgres:5432/fringepay
+      FRINGEPAY_DEFAULT_PROVIDER: ${FRINGEPAY_DEFAULT_PROVIDER:-sandbox}
+      FRINGEPAY_DARAJA_ENVIRONMENT: ${FRINGEPAY_DARAJA_ENVIRONMENT:-sandbox}
+      FRINGEPAY_DARAJA_CONSUMER_KEY: ${FRINGEPAY_DARAJA_CONSUMER_KEY:-}
+      FRINGEPAY_DARAJA_CONSUMER_SECRET: ${FRINGEPAY_DARAJA_CONSUMER_SECRET:-}
+      FRINGEPAY_DARAJA_SHORTCODE: ${FRINGEPAY_DARAJA_SHORTCODE:-}
+      FRINGEPAY_DARAJA_PASSKEY: ${FRINGEPAY_DARAJA_PASSKEY:-}
+      FRINGEPAY_DARAJA_CALLBACK_URL: ${FRINGEPAY_DARAJA_CALLBACK_URL:-}
+      FRINGEPAY_DARAJA_CALLBACK_SECRET: ${FRINGEPAY_DARAJA_CALLBACK_SECRET:-}
+      FRINGEPAY_DARAJA_TRANSACTION_TYPE: ${FRINGEPAY_DARAJA_TRANSACTION_TYPE:-CustomerPayBillOnline}
+      FRINGEPAY_PII_ENCRYPTION_KEY: ${FRINGEPAY_PII_ENCRYPTION_KEY:-}
+      FRINGEPAY_SANDBOX_WEBHOOK_SECRET: ${FRINGEPAY_SANDBOX_WEBHOOK_SECRET:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["fringepay-worker"]
+    environment: *fringepay_environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   fringepay_postgres_data:
