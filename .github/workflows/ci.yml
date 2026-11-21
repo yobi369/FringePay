@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "foundation/**", "launch/**", "feature/**"]
+    branches: [main, "foundation/**", "launch/**", "feature/**", "deploy/**"]
   pull_request:
 
 permissions:
@@ -39,3 +39,7 @@ jobs:
         run: ruff check .
       - name: Test
         run: pytest
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+      - name: Build runtime image
+        run: docker build -t fringepay:ci .
