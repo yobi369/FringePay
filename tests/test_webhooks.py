@@ -185,6 +185,7 @@ def test_daraja_callback_is_verified_by_status_query_not_callback_result(
             replay = test_client.post(
                 "/v1/webhooks/daraja?token=daraja-test-callback-secret", json=callback
             )
+            unauthenticated = test_client.post("/v1/webhooks/daraja", json=callback)
             fetched = test_client.get(
                 f"/v1/payments/{payment_id}",
                 headers={"X-API-Key": "local-development-key"},
@@ -195,6 +196,7 @@ def test_daraja_callback_is_verified_by_status_query_not_callback_result(
         assert first.json()["duplicate"] is False
         assert replay.status_code == 200
         assert replay.json()["duplicate"] is True
+        assert unauthenticated.status_code == 401
         assert fetched.status_code == 200
         assert fetched.json()["status"] == "succeeded"
     finally:
