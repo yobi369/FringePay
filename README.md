@@ -95,6 +95,7 @@ In a second terminal, run fringepay-worker to drain pending sandbox outbox event
 ## API
 
 - GET /health — process health only; it does not prove database/provider readiness.
+- GET /ready — checks connectivity to the configured database.
 - GET /v1/status — confirms sandbox-only mode.
 - POST /v1/payments — reserve a sandbox payment and queue dispatch; returns HTTP 202. Requires X-API-Key and Idempotency-Key headers plus JSON body with amount_minor, currency, and reference.
 - GET /v1/payments/{payment_id} — retrieve a persisted payment; requires X-API-Key.
