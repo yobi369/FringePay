@@ -21,6 +21,18 @@ class ProviderResult:
     status: PaymentStatus
 
 
+class ProviderTemporaryError(RuntimeError):
+    """A provider call failed before a payment request could be submitted."""
+
+
+class ProviderOutcomeUnknown(RuntimeError):
+    """A provider may have accepted a request, but its response was not received."""
+
+
+class ProviderRejected(ValueError):
+    """A provider definitively rejected a payment initiation request."""
+
+
 class PaymentProvider(Protocol):
     name: str
 
