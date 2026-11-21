@@ -171,3 +171,39 @@ async def test_outbox_dead_letters_after_maximum_attempts(tmp_path: Path) -> Non
     status = await repository.outbox_status(outbox_id)
     assert status == ("dead_letter", 12, "provider_dispatch_failed")
     await database.close()
+
+
+@pytest.mark.asyncio
+async def test_payment_phone_number_is_persisted_and_bound_to_idempotency(
+    tmp_path: Path,
+) -> None:
+    database = Database(f"sqlite+aiosqlite:///{tmp_path / 'phone.db'}")
+    await database.create_schema()
+    repository = PaymentRepository(database)
+    request = CreatePayment(
+        Money(2500, "KES"),
+        "phone-payment-order",
+        phone_number="254712345678",
+    )
+
+    payment, created = await repository.reserve(
+        request, "phone-payment-key", provider="daraja"
+    )
+    assert created is True
+    assert payment.phone_number == "254712345678"
+
+    fetched = await repository.get(payment.id)
+    assert fetched is not None
+    assert fetched.phone_number == "254712345678"
+
+    with pytest.raises(PersistentIdempotencyConflict):
+        await repository.reserve(
+            CreatePayment(
+                Money(2500, "KES"),
+                "phone-payment-order",
+                phone_number="254712345679",
+            ),
+            "phone-payment-key",
+            provider="daraja",
+        )
+    await database.close()
