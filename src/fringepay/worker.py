@@ -115,12 +115,13 @@ async def reconcile_daraja_statuses(
 async def run_worker(poll_interval_seconds: float = 1.0) -> None:
     settings = get_settings()
     database = Database(settings.database_url)
-    if settings.environment != "production":
-        await database.create_schema()
-    repository = PaymentRepository(database)
-    provider = build_provider(settings)
-    last_reconcile = 0.0
+    provider = None
     try:
+        if settings.environment != "production":
+            await database.create_schema()
+        repository = PaymentRepository(database)
+        provider = build_provider(settings)
+        last_reconcile = 0.0
         while True:
             did_work = await dispatch_one(repository, provider)
             now = time.monotonic()
