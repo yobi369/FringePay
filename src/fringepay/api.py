@@ -1,6 +1,7 @@
 """HTTP routes for asynchronous sandbox payment operations."""
 
 import hashlib
+import hmac
 import json
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -126,6 +127,11 @@ async def receive_daraja_webhook(request: Request) -> dict[str, str | bool]:
     settings = get_settings()
     if settings.default_provider != "daraja":
         raise HTTPException(status_code=503, detail="Daraja provider is not enabled")
+    callback_token = request.query_params.get("token", "")
+    if not settings.daraja_callback_secret or not hmac.compare_digest(
+        callback_token, settings.daraja_callback_secret
+    ):
+        raise HTTPException(status_code=401, detail="invalid Daraja callback token")
     raw_body = await request.body()
     try:
         payload = json.loads(raw_body)
