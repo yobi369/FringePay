@@ -83,7 +83,7 @@ def test_create_and_retrieve_sandbox_payment(api_client: TestClient) -> None:
         },
         json={"amount_minor": 1000, "currency": "KES", "reference": "order-api-1"},
     )
-    assert response.status_code == 201
+    assert response.status_code == 202
     body = response.json()
     assert body["provider"] == "sandbox"
     assert body["status"] == "pending"
@@ -113,8 +113,8 @@ def test_api_idempotency_is_durable_and_payload_bound(api_client: TestClient) ->
         json={**payload, "amount_minor": 1600},
     )
 
-    assert first.status_code == 201
-    assert replay.status_code == 201
+    assert first.status_code == 202
+    assert replay.status_code == 202
     assert replay.json()["id"] == first.json()["id"]
     assert conflict.status_code == 409
 
@@ -129,7 +129,6 @@ def test_api_rejects_float_minor_units(api_client: TestClient) -> None:
         json={"amount_minor": 10.5, "currency": "KES", "reference": "float-order"},
     )
     assert response.status_code == 422
-
 
 
 def test_payment_api_rejects_missing_api_key(api_client: TestClient) -> None:
