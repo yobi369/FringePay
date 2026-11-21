@@ -41,6 +41,7 @@ class CreatePaymentBody(BaseModel):
     amount_minor: int = Field(gt=0, strict=True)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     reference: str = Field(min_length=1, max_length=128)
+    phone_number: str | None = Field(default=None, pattern=r"^254[17]\\d{8}$")
 
 
 class PaymentResponse(BaseModel):
@@ -77,13 +78,20 @@ async def create_payment(
     from holding an HTTP request open. The outbox worker owns all provider dispatch.
     """
     repository: PaymentRepository = request.app.state.repository
+    settings = get_settings()
+    if settings.default_provider == "daraja" and body.phone_number is None:
+        raise HTTPException(status_code=422, detail="phone_number is required for Daraja STK Push")
     create_request = CreatePayment(
         amount=Money(minor_units=body.amount_minor, currency=body.currency),
         reference=body.reference,
+        phone_number=body.phone_number,
     )
     try:
         payment, _ = await repository.reserve(
-            create_request, idempotency_key, tenant_id=request.state.tenant_id
+            create_request,
+            idempotency_key,
+            provider=settings.default_provider,
+            tenant_id=request.state.tenant_id,
         )
     except PersistentIdempotencyConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
