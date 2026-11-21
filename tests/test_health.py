@@ -17,3 +17,11 @@ def test_status_endpoint_is_explicitly_sandbox_only() -> None:
 
     assert response.status_code == 200
     assert response.json()["mode"] == "sandbox-only"
+
+
+def test_readiness_endpoint_checks_database_connection() -> None:
+    with TestClient(app) as test_client:
+        response = test_client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "database": "available"}
