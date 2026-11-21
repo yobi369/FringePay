@@ -8,12 +8,12 @@ from sqlalchemy import text
 from fringepay.api import router as payments_router
 from fringepay.api import webhook_router
 from fringepay.config import get_settings
-from fringepay.provider_factory import validate_provider_settings
 from fringepay.persistence import (
     LATEST_SCHEMA_REVISION,
     Database,
     PaymentRepository,
 )
+from fringepay.provider_factory import validate_provider_settings
 
 
 @asynccontextmanager
