@@ -91,7 +91,7 @@ async def reconcile_daraja_statuses(
         if verified_status is None:
             continue
         fingerprint = (
-            f"{payment.provider_reference}:{verified_status.value}".encode("utf-8")
+            f"{payment.provider_reference}:{verified_status.value}".encode()
         )
         payload_hash = hashlib.sha256(fingerprint).hexdigest()
         try:
