@@ -178,13 +178,10 @@ def test_daraja_callback_is_verified_by_status_query_not_callback_result(
                 }
             }
         }
+        callback_url = "/v1/webhooks/daraja?token=daraja-test-callback-secret-123456"
         with TestClient(app) as test_client:
-            first = test_client.post(
-                "/v1/webhooks/daraja?token=daraja-test-callback-secret-123456", json=callback
-            )
-            replay = test_client.post(
-                "/v1/webhooks/daraja?token=daraja-test-callback-secret-123456", json=callback
-            )
+            first = test_client.post(callback_url, json=callback)
+            replay = test_client.post(callback_url, json=callback)
             unauthenticated = test_client.post("/v1/webhooks/daraja", json=callback)
             fetched = test_client.get(
                 f"/v1/payments/{payment_id}",
