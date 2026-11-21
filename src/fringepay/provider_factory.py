@@ -26,6 +26,8 @@ def validate_provider_settings(settings: Settings) -> None:
     missing = [name for name, value in required.items() if not value]
     if missing:
         raise ValueError(f"missing Daraja configuration: {', '.join(missing)}")
+    if len(settings.daraja_callback_secret) < 32:
+        raise ValueError("Daraja callback secret must be at least 32 characters")
     if not settings.daraja_callback_url.startswith("https://"):
         raise ValueError("Daraja callback URL must use HTTPS")
     callback_tokens = parse_qs(urlsplit(settings.daraja_callback_url).query).get("token", [])
