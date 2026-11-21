@@ -10,8 +10,8 @@ import time
 from fringepay.config import get_settings
 from fringepay.domain import PaymentStatus
 from fringepay.persistence import (
-    Database,
     LATEST_SCHEMA_REVISION,
+    Database,
     PaymentRepository,
     WebhookReplayConflict,
 )
