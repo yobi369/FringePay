@@ -45,7 +45,7 @@ Set:
     FRINGEPAY_DARAJA_CALLBACK_SECRET=<high-entropy-secret>
     FRINGEPAY_PII_ENCRYPTION_KEY=<fernet-key>
 
-The callback endpoint must be reachable over HTTPS. Redact its query string from proxy/access logs. The same database, provider credentials, callback settings, and encryption key must be available to the API and worker.
+The callback endpoint must be reachable over HTTPS. The container disables Uvicorn access logs to avoid recording the callback token; also redact its query string from reverse-proxy, load-balancer, and hosting-platform logs. The same database, provider credentials, callback settings, and encryption key must be available to the API and worker.
 
 ## Production deployment requirements
 
