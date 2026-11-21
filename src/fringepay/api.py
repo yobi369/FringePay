@@ -41,7 +41,7 @@ class CreatePaymentBody(BaseModel):
     amount_minor: int = Field(gt=0, strict=True)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     reference: str = Field(min_length=1, max_length=128)
-    phone_number: str | None = Field(default=None, pattern=r"^254[17]\\d{8}$")
+    phone_number: str | None = Field(default=None, pattern=r"^254[17]\d{8}$")
 
 
 class PaymentResponse(BaseModel):
