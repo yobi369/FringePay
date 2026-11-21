@@ -8,6 +8,7 @@ from sqlalchemy import text
 from fringepay.api import router as payments_router
 from fringepay.api import webhook_router
 from fringepay.config import get_settings
+from fringepay.provider_factory import validate_provider_settings
 from fringepay.persistence import (
     LATEST_SCHEMA_REVISION,
     Database,
@@ -18,6 +19,7 @@ from fringepay.persistence import (
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     settings = get_settings()
+    validate_provider_settings(settings)
     database = Database(settings.database_url)
     if settings.environment != "production":
         await database.create_schema()
