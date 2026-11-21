@@ -564,26 +564,43 @@ class PaymentRepository:
                 return claimed.id, self._to_domain(payment_row)
 
     async def recover_stale_dispatches(self, stale_after_seconds: int = 60) -> int:
-        """Make abandoned processing leases eligible for safe idempotent retry."""
+        """Recover leases without blindly repeating a possibly accepted live charge."""
         now = datetime.now(UTC)
         cutoff = now - timedelta(seconds=stale_after_seconds)
+        recovered = 0
         async with self.database.sessions() as session:
             async with session.begin():
-                result = await session.execute(
-                    update(ProviderDispatchOutboxRow)
-                    .where(
-                        ProviderDispatchOutboxRow.status == "processing",
-                        ProviderDispatchOutboxRow.locked_at < cutoff,
+                events = (
+                    await session.scalars(
+                        select(ProviderDispatchOutboxRow)
+                        .where(
+                            ProviderDispatchOutboxRow.status == "processing",
+                            ProviderDispatchOutboxRow.locked_at < cutoff,
+                        )
+                        .with_for_update(skip_locked=True)
                     )
-                    .values(
-                        status="retry",
-                        available_at=now,
-                        locked_at=None,
-                        last_error_code="dispatch_lease_expired",
-                        updated_at=now,
-                    )
-                )
-                return result.rowcount or 0
+                ).all()
+                for event in events:
+                    payment = await session.get(PaymentRow, event.payment_id)
+                    if payment is None:
+                        raise RuntimeError("outbox event has no payment")
+                    event.locked_at = None
+                    event.updated_at = now
+                    if payment.provider == "sandbox":
+                        event.status = "retry"
+                        event.available_at = now
+                        event.last_error_code = "dispatch_lease_expired"
+                    else:
+                        # A worker may have crashed after the provider accepted the
+                        # request but before the acknowledgement was persisted.
+                        # Quarantine this payment for status query/manual resolution.
+                        event.status = "unknown"
+                        event.last_error_code = "dispatch_lease_expired_unknown"
+                        if payment.status == PaymentStatus.PENDING.value:
+                            payment.status = PaymentStatus.PROCESSING.value
+                            payment.updated_at = now
+                    recovered += 1
+        return recovered
 
     async def retry_dispatch(
         self,
