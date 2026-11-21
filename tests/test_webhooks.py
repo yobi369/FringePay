@@ -128,6 +128,14 @@ def test_daraja_callback_is_verified_by_status_query_not_callback_result(
     database_url = f"sqlite+aiosqlite:///{database_path}"
     monkeypatch.setenv("FRINGEPAY_DATABASE_URL", database_url)
     monkeypatch.setenv("FRINGEPAY_DEFAULT_PROVIDER", "daraja")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_CONSUMER_KEY", "sandbox-key")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_CONSUMER_SECRET", "sandbox-secret")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_SHORTCODE", "174379")
+    monkeypatch.setenv("FRINGEPAY_DARAJA_PASSKEY", "sandbox-passkey")
+    monkeypatch.setenv(
+        "FRINGEPAY_DARAJA_CALLBACK_URL",
+        "https://payments.example.test/v1/webhooks/daraja",
+    )
     get_settings.cache_clear()
 
     async def seed_payment() -> str:
