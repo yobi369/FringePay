@@ -4,11 +4,16 @@ import hmac
 from urllib.parse import parse_qs, urlsplit
 
 from fringepay.config import Settings
+from fringepay.pii import PhoneNumberCipher
 from fringepay.providers import PaymentProvider, SandboxProvider
 
 
 def validate_provider_settings(settings: Settings) -> None:
     """Fail fast when the selected adapter cannot be safely configured."""
+    if settings.environment == "production":
+        if not settings.database_url.startswith("postgresql+asyncpg://"):
+            raise ValueError("production requires a PostgreSQL async database URL")
+        PhoneNumberCipher(settings.pii_encryption_key, required=True)
     if settings.default_provider == "sandbox":
         return
     if settings.default_provider != "daraja":

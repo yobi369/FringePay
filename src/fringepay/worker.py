@@ -15,7 +15,7 @@ from fringepay.persistence import (
     PaymentRepository,
     WebhookReplayConflict,
 )
-from fringepay.provider_factory import build_provider
+from fringepay.provider_factory import build_provider, validate_provider_settings
 from fringepay.providers import (
     PaymentCommand,
     PaymentProvider,
@@ -115,6 +115,7 @@ async def reconcile_daraja_statuses(
 
 async def run_worker(poll_interval_seconds: float = 1.0) -> None:
     settings = get_settings()
+    validate_provider_settings(settings)
     database = Database(settings.database_url)
     provider = None
     try:
