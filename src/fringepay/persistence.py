@@ -32,8 +32,10 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from fringepay.config import get_settings
 from fringepay.domain import Money, Payment, PaymentStatus
 from fringepay.ledger import EntrySide, Journal
+from fringepay.pii import PhoneNumberCipher
 from fringepay.reconciliation import (
     SettlementConflict,
     SettlementLine,
@@ -92,7 +94,7 @@ class PaymentRow(Base):
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     reference: Mapped[str] = mapped_column(String(128), nullable=False)
-    phone_number: Mapped[str | None] = mapped_column(String(16))
+    phone_number: Mapped[str | None] = mapped_column(String(512))
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     provider_reference: Mapped[str | None] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -331,6 +333,11 @@ class PaymentRepository:
 
     def __init__(self, database: Database) -> None:
         self.database = database
+        settings = get_settings()
+        self.phone_cipher = PhoneNumberCipher(
+            settings.pii_encryption_key,
+            required=settings.environment == "production",
+        )
 
     @staticmethod
     def _request_hash(request: CreatePayment) -> str:
@@ -343,8 +350,7 @@ class PaymentRepository:
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-    @staticmethod
-    def _to_domain(row: PaymentRow) -> Payment:
+    def _to_domain(self, row: PaymentRow) -> Payment:
         return Payment(
             id=row.id,
             amount=Money(row.amount_minor, row.currency),
@@ -352,7 +358,7 @@ class PaymentRepository:
             provider=row.provider,
             provider_reference=row.provider_reference,
             status=PaymentStatus(row.status),
-            phone_number=row.phone_number,
+            phone_number=self.phone_cipher.decrypt(row.phone_number),
         )
 
     async def reserve(
@@ -397,7 +403,7 @@ class PaymentRepository:
                         amount_minor=request.amount.minor_units,
                         currency=request.amount.currency,
                         reference=request.reference,
-                        phone_number=request.phone_number,
+                        phone_number=self.phone_cipher.encrypt(request.phone_number),
                         provider=provider,
                         provider_reference=None,
                         status=PaymentStatus.PENDING.value,
