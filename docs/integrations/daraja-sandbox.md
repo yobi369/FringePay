@@ -20,7 +20,8 @@ Official portal: https://developer.safaricom.co.ke/
     FRINGEPAY_DARAJA_CONSUMER_SECRET=your-sandbox-consumer-secret
     FRINGEPAY_DARAJA_SHORTCODE=174379
     FRINGEPAY_DARAJA_PASSKEY=your-sandbox-lipa-na-m-pesa-passkey
-    FRINGEPAY_DARAJA_CALLBACK_URL=https://your-public-host/v1/webhooks/daraja
+    FRINGEPAY_DARAJA_CALLBACK_URL=https://your-public-host/v1/webhooks/daraja?token=your-callback-secret
+    FRINGEPAY_DARAJA_CALLBACK_SECRET=your-callback-secret
     FRINGEPAY_DARAJA_TRANSACTION_TYPE=CustomerPayBillOnline
     FRINGEPAY_PII_ENCRYPTION_KEY=<generated-fernet-key>
 
