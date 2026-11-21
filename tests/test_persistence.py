@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from cryptography.fernet import Fernet
-
 import pytest
 
 from fringepay.config import get_settings
@@ -9,9 +8,9 @@ from fringepay.domain import Money, PaymentStatus
 from fringepay.persistence import (
     Database,
     PaymentRepository,
+    PaymentRow,
     PersistentIdempotencyConflict,
     ProviderDispatchOutboxRow,
-    PaymentRow,
 )
 from fringepay.service import CreatePayment
 
