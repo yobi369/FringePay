@@ -1,4 +1,5 @@
 import base64
+import json
 
 import httpx
 import pytest
@@ -41,10 +42,10 @@ async def test_daraja_stk_push_uses_oauth_and_returns_pending_acknowledgement() 
             return httpx.Response(200, json={"access_token": "test-token", "expires_in": "3599"})
         assert request.url.path == "/mpesa/stkpush/v1/processrequest"
         assert request.headers["Authorization"] == "Bearer test-token"
-        payload = __import__("json").loads(request.content)
+        payload = json.loads(request.content)
         assert payload["Amount"] == 125
         assert payload["PartyA"] == "254712345678"
-        assert payload["AccountReference"] == "payment-id-12"
+        assert payload["AccountReference"] == "payment-id-1"
         assert payload["TransactionType"] == "CustomerPayBillOnline"
         password_source = base64.b64decode(payload["Password"]).decode()
         assert password_source.startswith("174379sandbox-passkey")
