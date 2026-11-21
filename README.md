@@ -2,73 +2,62 @@
 
 **Provider-independent payment orchestration for African applications.**
 
-FringePay is an API and orchestration layer designed to give applications one consistent
-interface to multiple authorized payment providers. FringePay owns the integration abstractions,
-transaction lifecycle, ledger, reconciliation, webhook delivery, and operational controls;
-external providers remain responsible for executing regulated payment rails.
+FringePay provides one API and operational layer for applications and merchants integrating with multiple authorized payment providers. Providers execute the regulated payment rails; FringePay manages payment orchestration, transaction state, idempotency, webhooks, ledgering, reconciliation, and operational controls.
 
-> **Current status:** Early sandbox foundation. The HTTP API now stores payment and idempotency
-> records through SQLAlchemy. No live-money processing or live provider integration is enabled.
+> **Current release status: sandbox-only engineering release candidate.** No live provider adapter or live-money processing is enabled. The current API reserves payments and queues durable dispatch work; the separate worker is the only component that calls a provider adapter.
 
-## Design principles
+## Product direction
 
-- **Provider independence:** application code depends on a stable internal contract, not a provider SDK.
-- **Explicit money semantics:** amounts use integer minor units and ISO currency codes; never floats.
-- **Ledger integrity:** immutable, balanced double-entry postings; corrections use compensating entries.
-- **Idempotency:** database uniqueness prevents duplicate reservations for the same key.
-- **Observable state:** payment transitions are explicit, validated, timestamped, and auditable.
-- **Secure by default:** secrets stay outside source control; webhooks are authenticated; sensitive data is minimized.
-- **Honest capability boundaries:** sandbox simulations are not settlement evidence.
+Start in Kenya with M-Pesa through an approved Daraja integration, then expand to additional authorized payment providers and markets. FringePay is an orchestration platform, not a replacement for Safaricom's payment network, a bank, or a wallet issuer.
 
-## Current implementation
+## Implemented foundation
 
 - FastAPI payment creation and retrieval endpoints.
 - Deterministic sandbox provider adapter; no real payment rail is called.
-- SQLAlchemy 2 async persistence for payments and idempotency keys.
-- SQLite local default and PostgreSQL async driver support.
-- Alembic versioned schema migrations.
+- SQLAlchemy 2 async persistence and Alembic migrations.
+- PostgreSQL support and SQLite local development support.
+- Tenant-scoped API credentials stored as SHA-256 hashes, revocation, and tenant-isolated payment reads.
+- Durable tenant-scoped idempotency with payload-conflict detection.
 - Transactional provider-dispatch outbox with atomic claims, bounded exponential retries, dead-letter handling, and expired-lease recovery.
-- Separate worker command for draining due outbox events (currently sandbox adapter only).
+- Separate worker command for dispatching outbox events (sandbox adapter only).
+- Payment lifecycle transition validation.
 - Double-entry journal validation and tenant-scoped persistence with idempotent journal references and derived account balances.
 - Tenant-scoped settlement matching with duplicate detection and matched, pending, unmatched, and mismatch outcomes.
-- Tenant-scoped API credentials stored as SHA-256 hashes, with revocation and tenant-isolated payment reads.
-- Timestamped HMAC-SHA256 verification and replay protection for sandbox provider callbacks.
+- Timestamped HMAC-SHA256 verification and replay protection for sandbox callbacks.
 - Strict integer validation for monetary minor units.
-- Lifecycle transition validation and CI lint/test checks.
 
-The HTTP request reserves a payment, idempotency key, and provider-dispatch outbox event in one
-database transaction. A repeated request with the same key and payload returns the existing
-payment; a changed payload returns HTTP 409. The API and a separate worker compete for events
-using atomic database claims, and abandoned processing leases can be retried. Provider adapters
-must use the stable payment ID as their external idempotency reference before live integrations.
-The ledger is currently a separate journal subsystem: payment status changes do not automatically
-post ledger entries, and a sandbox result is never treated as settlement evidence.
+## Important implementation boundary
 
-## Planned architecture
+The payment creation endpoint reserves a payment and outbox event in one database transaction, then returns HTTP 202 Accepted. It does not call the provider inside the HTTP request. The worker claims the outbox event and dispatches it. A repeated request with the same tenant, idempotency key, and payload returns the existing payment; reusing the key with a different payload returns HTTP 409.
 
-```text
-Client applications
-        |
-        v
-FringePay API ---- Authentication / tenant boundary
-        |
-        v
-Payment orchestration
-  |          |             |
-  v          v             v
-Routing   State machine  Idempotency
-        |
-        v
-Provider adapter contract
-  |             |                |
-  v             v                v
-Sandbox      Daraja*          Other providers*
-        |
-        v
-Ledger / Webhook outbox / Reconciliation / Audit log
+A provider timeout is an unknown outcome, not proof that a charge failed. Provider adapters must use the stable FringePay payment ID as their provider-side idempotency/correlation reference wherever supported. The ledger is currently a separate journal subsystem: payment status changes do not automatically post ledger entries, and a provider callback is not settlement evidence.
 
-*Provider integrations require approved credentials, contracts, and compliance review.
-```
+## Architecture
+
+    Client applications
+            |
+            v
+    FringePay API ---- Authentication / tenant boundary
+            |
+            v
+    Payment reservation + idempotency
+            |
+            v
+    Transactional provider outbox
+            |
+            v
+    Background worker
+            |
+            v
+    Provider adapter contract
+      |             |              |
+      v             v              v
+    Sandbox       Daraja*       Other providers*
+            |
+            v
+    Verified callbacks / ledger / reconciliation / audit
+
+*Provider integrations require approved credentials, contracts, and compliance review.*
 
 ## Technology
 
@@ -81,97 +70,60 @@ Ledger / Webhook outbox / Reconciliation / Audit log
 
 ## Local development
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[dev]"
-cp .env.example .env
-uvicorn fringepay.main:app --reload
-```
+    python -m venv .venv
+    source .venv/bin/activate
+    python -m pip install -e ".[dev]"
+    cp .env.example .env
+    uvicorn fringepay.main:app --reload
 
-By default, development uses local SQLite at `./fringepay.db`; the development app creates its
-schema automatically. For PostgreSQL, start the local service:
+By default, development uses local SQLite at ./fringepay.db; the development app creates its schema automatically. For PostgreSQL, start the local service:
 
-```bash
-docker compose up -d postgres
-```
+    docker compose up -d postgres
 
-Then set `FRINGEPAY_DATABASE_URL` in `.env` to:
+Then set FRINGEPAY_DATABASE_URL in .env to:
 
-```text
-postgresql+asyncpg://fringepay:localdev_only_change_me@localhost:5432/fringepay
-```
+    postgresql+asyncpg://fringepay:localdev_only_change_me@localhost:5432/fringepay
 
 Apply versioned migrations before running a deployment that does not auto-create tables:
 
-```bash
-alembic upgrade head
-```
+    alembic upgrade head
 
-The local compose password is for development only. Replace it and use managed secrets for
-any shared environment. Local development seeds a tenant and the local-only key
-`local-development-key`. For a deployed environment, apply migrations and run
-`fringepay-admin create-tenant --name "Merchant Name"`; the random API key is displayed once
-and must be stored in a secret manager. Revoke a credential with
-`fringepay-admin revoke-api-key --tenant-id TENANT_ID --key-prefix KEY_PREFIX`. Production
-startup verifies that the database has reached the latest Alembic revision. In a second terminal,
-run `fringepay-worker` to drain pending sandbox outbox events.
+The local compose password is for development only. Replace it and use managed secrets for any shared environment. Local development seeds a tenant and the local-only key local-development-key. For a deployed environment, apply migrations and run fringepay-admin create-tenant --name "Merchant Name"; the random API key is displayed once and must be stored in a secret manager. Revoke a credential with fringepay-admin revoke-api-key --tenant-id TENANT_ID --key-prefix KEY_PREFIX.
+
+In a second terminal, run fringepay-worker to drain pending sandbox outbox events. The current worker is sandbox-only.
 
 ## API
 
-- `GET /health` — process health only; it does not prove database/provider readiness.
-- `GET /v1/status` — confirms sandbox-only mode.
-- `POST /v1/payments` — create a simulated payment. Requires `X-API-Key` and `Idempotency-Key`
-  headers plus JSON body with `amount_minor`, `currency`, and `reference`.
-- `GET /v1/payments/{payment_id}` — retrieve a persisted payment; requires `X-API-Key`.
-- `POST /v1/webhooks/sandbox` — accept a signed sandbox status callback; requires
-  `X-Provider-Event-Id` and `X-FringePay-Signature`, not the client API key.
+- GET /health — process health only; it does not prove database/provider readiness.
+- GET /ready — checks connectivity to the configured database.
+- GET /v1/status — confirms sandbox-only mode.
+- POST /v1/payments — reserve a sandbox payment and queue dispatch; returns HTTP 202. Requires X-API-Key and Idempotency-Key headers plus JSON body with amount_minor, currency, and reference.
+- GET /v1/payments/{payment_id} — retrieve a persisted payment; requires X-API-Key.
+- POST /v1/webhooks/sandbox — accept a signed sandbox status callback; requires X-Provider-Event-Id and X-FringePay-Signature, not the client API key.
 
-Example:
+Example request:
 
-```bash
-curl -X POST http://127.0.0.1:8000/v1/payments \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: local-order-001" \
-  -d '{"amount_minor":1250,"currency":"KES","reference":"order-001"}'
-```
+    curl -i -X POST http://127.0.0.1:8000/v1/payments       -H "Content-Type: application/json"       -H "X-API-Key: local-development-key"       -H "Idempotency-Key: local-order-001"       -d '{"amount_minor":1250,"currency":"KES","reference":"order-001"}'
 
-For KES, `amount_minor` is cents: KSh 10.50 is represented as 1050.
+For KES, amount_minor is cents: KSh 10.50 is represented as 1050. A 202 response means the payment was accepted for asynchronous processing, not that the provider accepted or settled it.
 
-The sandbox webhook secret is configured with `FRINGEPAY_SANDBOX_WEBHOOK_SECRET`. The signature
-header format is `t=<unix_timestamp>,v1=<hex_hmac_sha256>`, calculated over the timestamp, a dot,
-and the exact raw request body. The default timestamp tolerance is 300 seconds. This generic
-scheme is a sandbox contract, not a claim of compatibility with any specific provider signature.
+The sandbox webhook secret is configured with FRINGEPAY_SANDBOX_WEBHOOK_SECRET. The signature header format is t=<unix_timestamp>,v1=<hex_hmac_sha256>, calculated over the timestamp, a dot, and the exact raw request body. The default timestamp tolerance is 300 seconds. This generic scheme is a sandbox contract, not a claim of compatibility with any specific provider signature.
 
-## Development milestones
+## Launch milestones
 
-1. Repository foundation, domain models, configuration, and CI.
-2. Provider interface and deterministic sandbox adapter.
-3. Durable payment storage, idempotency, API integration, and lifecycle state machine.
-4. Harden outbox recovery, provider idempotency, and PostgreSQL concurrency behavior.
-5. Link ledger postings to verified settlement/reconciliation evidence and enforce append-only controls.
-6. Provider webhook signature verification, durable event replay protection, and reconciliation.
-7. Tenant authentication, authorization, auditability, and operational controls.
-8. Authorized provider adapters in sandbox/test environments.
-9. Security, compliance, load, and failure-mode hardening before any live-money pilot.
+See the Kenya MVP launch plan at docs/launch/kenya-mvp-plan.md for the release stages, acceptance criteria, and payment safety invariants.
 
 ## Safety and scope
 
-FringePay is not a bank, wallet issuer, payment scheme, or substitute for provider authorization.
-A sandbox success result is not evidence of settlement or movement of customer funds. Live
-processing must remain disabled until provider approval, legal/regulatory assessment, security
-review, reconciliation, operational controls, and applicable licensing obligations are addressed.
+FringePay is not a bank, wallet issuer, payment scheme, or substitute for provider authorization. A sandbox success result is not evidence of settlement or movement of customer funds. Live processing must remain disabled until provider approval, legal/regulatory assessment, security review, reconciliation, operational controls, and applicable licensing obligations are addressed.
 
 ## Quality checks
 
-```bash
-ruff check .
-pytest
-```
+    ruff check .
+    pytest
 
 Never commit credentials, private keys, production customer data, or real payment secrets.
 
 ## License
 
-License selection is intentionally pending until the owner confirms the intended distribution
-and commercial model.
+License selection is intentionally pending until the owner confirms the intended distribution and commercial model.

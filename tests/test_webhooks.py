@@ -62,7 +62,7 @@ def test_signed_webhook_updates_payment_and_rejects_replays(
             "reference": "webhook-payment",
         },
     )
-    assert created.status_code == 201
+    assert created.status_code == 202
     payment_id = created.json()["id"]
 
     payload = {"payment_id": payment_id, "status": "processing"}

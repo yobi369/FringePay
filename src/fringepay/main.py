@@ -2,7 +2,8 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from sqlalchemy import text
 
 from fringepay.api import router as payments_router
 from fringepay.api import webhook_router
@@ -45,6 +46,18 @@ app = FastAPI(
 async def health() -> dict[str, str]:
     """Return process health; this does not imply provider or database readiness."""
     return {"status": "ok", "service": "fringepay"}
+
+
+@app.get("/ready", tags=["operations"])
+async def readiness(request: Request) -> dict[str, str]:
+    """Return ready only when the application can reach its configured database."""
+    database: Database = request.app.state.database
+    try:
+        async with database.engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="database is not ready") from exc
+    return {"status": "ready", "database": "available"}
 
 
 @app.get(f"{settings.api_prefix}/status", tags=["operations"])
