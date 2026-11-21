@@ -610,6 +610,24 @@ class PaymentRepository:
                 event.last_error_code = error_code[:64]
                 event.updated_at = now
 
+    async def mark_dispatch_unknown(self, outbox_id: str, error_code: str) -> None:
+        """Stop automatic retries when a provider may already have accepted a charge."""
+        async with self.database.sessions() as session:
+            async with session.begin():
+                event = await session.get(ProviderDispatchOutboxRow, outbox_id)
+                if event is None or event.status != "processing":
+                    raise ValueError("dispatch event is not claimed")
+                payment = await session.get(PaymentRow, event.payment_id)
+                if payment is None:
+                    raise RuntimeError("outbox event has no payment")
+                if payment.status == PaymentStatus.PENDING.value:
+                    payment.status = PaymentStatus.PROCESSING.value
+                    payment.updated_at = datetime.now(UTC)
+                event.status = "unknown"
+                event.locked_at = None
+                event.last_error_code = error_code[:64]
+                event.updated_at = datetime.now(UTC)
+
     async def outbox_status(self, outbox_id: str) -> tuple[str, int, str | None] | None:
         async with self.database.sessions() as session:
             event = await session.get(ProviderDispatchOutboxRow, outbox_id)
