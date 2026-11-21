@@ -78,11 +78,11 @@ A provider timeout is an unknown outcome, not proof that a charge failed. Provid
     cp .env.example .env
     uvicorn fringepay.main:app --reload
 
-By default, development uses local SQLite at ./fringepay.db; the development app creates its schema automatically. For the full local PostgreSQL + API + worker stack, use:
+By default, running the API directly uses local SQLite at ./fringepay.db and creates a fresh development schema automatically. For the full local PostgreSQL + API + worker stack, use:
 
     docker compose up --build -d
 
-Then set FRINGEPAY_DATABASE_URL in .env to:
+Compose injects the internal PostgreSQL connection URL into both API and worker. If you run the Python app directly on your host against the Compose database, set FRINGEPAY_DATABASE_URL to:
 
     postgresql+asyncpg://fringepay:localdev_only_change_me@localhost:5432/fringepay
 
