@@ -192,7 +192,10 @@ class DarajaProvider:
         except (ValueError, TypeError, AttributeError) as exc:
             raise ProviderOutcomeUnknown("Daraja returned an unreadable STK Push response") from exc
 
-        if str(result.get("ResponseCode")) != "0":
+        response_code = result.get("ResponseCode")
+        if response_code is None:
+            raise ProviderOutcomeUnknown("Daraja acknowledgement did not include a response code")
+        if str(response_code) != "0":
             raise ProviderRejected("Daraja did not accept the STK Push request")
         checkout_request_id = result.get("CheckoutRequestID")
         if not isinstance(checkout_request_id, str) or not checkout_request_id:
